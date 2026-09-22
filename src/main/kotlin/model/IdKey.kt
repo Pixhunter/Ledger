@@ -1,6 +1,5 @@
 package org.example.model
 
-interface IdKey {
-    val id: Int
-        get() = id
+interface IdKey<TYPE> {
+    val id: TYPE
 }

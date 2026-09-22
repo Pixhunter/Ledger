@@ -1,8 +1,8 @@
 package org.example.model.enums
 
-import org.example.model.IdKey
+import org.example.model.EnumId
 
-enum class Country(id: Int) : IdKey {
+enum class Country(override val id: Short) : EnumId {
     FRANCE(1),
     GERMANY(2),
     AUSTRALIA(3),

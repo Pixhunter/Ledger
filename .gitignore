@@ -1,5 +1,8 @@
 .gradle
 build/
+src/generated
+shelved
+Claude outputs
 !gradle/wrapper/gradle-wrapper.jar
 !**/src/main/**/build/
 !**/src/test/**/build/
@@ -43,6 +46,5 @@ bin/
 
 ### Mac OS ###
 .DS_Store
-
 
 readme_task.md

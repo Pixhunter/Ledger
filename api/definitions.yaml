@@ -1,0 +1,124 @@
+components:
+  schemas:
+    requests:
+      PaymentRequest:
+        type: object
+        required:
+          - requestId
+          - merchantId
+          - customerId
+          - amount
+          - currency
+          - taxLocation
+        properties:
+          requestId:
+            $ref: '#/components/schemas/Id'
+          merchantId:
+            $ref: '#/components/schemas/Id'
+          customerId:
+            $ref: '#/components/schemas/Id'
+          amount:
+            $ref: '#/components/schemas/Amount'
+          currency:
+            $ref: '#/components/schemas/Currency'
+          taxLocation:
+            $ref: '#/components/schemas/TaxLocation'
+
+
+##-------------------------------------------------------------------------
+##---------       RESPONSES             -----------------------------------
+##-------------------------------------------------------------------------
+    responses:
+      PaymentResponse:
+        type: object
+        required: [ state ]
+        properties:
+          error:
+            $ref: '#/components/schemas/Error'
+          state:
+            $ref: '#/components/schemas/Status'
+
+
+##-------------------------------------------------------------------------
+##---------       ENTITIES              -----------------------------------
+##-------------------------------------------------------------------------
+    Id:
+      description: RFC 4122 UUID in canonical lowercase form, carried as a string.
+      type: string
+      format: uuid
+      minLength: 36
+      maxLength: 36
+      pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+      examples: [ 0b7a2c14-8f3e-4d16-9c5a-2e7b41d0f9a3 ]
+
+    Error:
+      description: Error in response
+      type: string
+
+    Status:
+      description: State machine result
+      type: string
+      enum: [ DONE, FAILED, IN_PROGRESS ]
+      examples: [ DONE ]
+
+    Currency:
+      description: Currency in alphabetic format (ISO 4217)
+      type: string
+      pattern: '^[A-Z]{3}$'
+      examples: [ EUR ]
+
+    Amount:
+      description: Money amount
+      type: integer
+      format: int64
+      minimum: 1
+      examples: [ 10000 ]
+
+    TaxLocation:
+      description: |
+        Where the sale is taxed. Comes from the customer, not the merchant -
+        tax follows the buyer. Captured per payment and stored immutably: a
+        customer moving must not change the jurisdiction of a past sale.
+      type: object
+      required: [ country ]
+      properties:
+        country:
+          description: ISO 3166-1 alpha-2, uppercase.
+          type: string
+          pattern: '^[A-Z]{2}$'
+          examples: [ DE ]
+        subdivision:
+          description: ISO 3166-2 code without the country prefix. Needed for US states, Canadian provinces, Brazilian states.
+          type: string
+          pattern: '^[A-Z0-9]{1,3}$'
+          examples: [ CA ]
+        postalCode:
+          description: US sales tax rates can vary by district, not only by state.
+          type: string
+          examples: [ '94107' ]
+        taxId:
+          description: VAT number or ABN. Its presence is what triggers B2B reverse charge.
+          type: string
+          examples: [ DE123456789 ]
+        customerType:
+          type: string
+          enum: [ INDIVIDUAL, BUSINESS ]
+          default: INDIVIDUAL
+        evidence:
+          description: |
+            What proved the country. EU rules require two non-contradictory
+            pieces, retained in case a tax authority asks years later.
+          type: array
+          items:
+            $ref: '#/components/schemas/TaxEvidence'
+
+    TaxEvidence:
+      type: object
+      required: [ type, value ]
+      properties:
+        type:
+          type: string
+          enum: [ BILLING_ADDRESS, IP_COUNTRY, CARD_BIN, PHONE_CODE ]
+        value:
+          type: string
+          examples: [ DE ]

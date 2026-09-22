@@ -1,0 +1,23 @@
+# Single source of truth for host, port and database connection.
+#
+# Nothing here is repeated anywhere else:
+#   - the app binds server.host/server.port at startup
+#   - the OpenAPI spec is served with its `servers` block injected from
+#     server.publicUrl, so api/api.yaml carries no URL of its own
+#   - Database.kt reads database.* instead of its own defaults
+#
+# Every value can be overridden by the environment variable named beside it,
+# so a deployment never has to ship a different file.
+
+server:
+  host: 0.0.0.0        # SERVER_HOST
+  port: 8081           # SERVER_PORT
+  # URL clients should call. Shown in Swagger. Leave blank to derive
+  # http://localhost:<port>.
+  publicUrl:           # SERVER_PUBLIC_URL
+
+database:
+  url: jdbc:postgresql://localhost:3333/ledger   # DB_URL
+  user: ledger                                   # DB_USER
+  password: ledger                               # DB_PASSWORD
+  poolSize: 10                                   # DB_POOL_SIZE
