@@ -1,0 +1,45 @@
+openapi: 3.1.0
+
+info:
+  title: MoR Ledger API
+  version: 0.1.0
+  description: |
+    ~(=^・ω・^)ﾉ        Merchant of Record ledger
+
+    Records captured payments and refunds,
+    derives tax liabilities and merchant balances from an append-only ledger.
+
+
+# Default target for an IDE preview of this file, so "Try it out" from
+# IntelliJ hits the running app instead of the IDE's own web server.
+# The copy served at GET /openapi.yaml replaces this block with the value
+# from config/application.yaml, so config still wins at runtime.
+servers:
+  - url: http://localhost:8081
+    description: local
+
+paths:
+  /v1/payment/capture:
+    post:
+      description: Make payment with all taxes from customer to merchant
+      operationId: payment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: './definitions.yaml#/components/schemas/requests/PaymentRequest'
+            example:
+              requestId: 0b7a2c14-8f3e-4d16-9c5a-2e7b41d0f9a3
+              merchantId: 5f1d9e02-3ab7-4c88-b0e5-6d427fa1c93b
+              customerId: c93e7a5b-1204-4f6d-8e91-7b3ad5c02e48
+              amount: 10000
+              currency: EUR
+
+      responses:
+        '200':
+          description: Success result
+          content:
+            application/json:
+              schema:
+                $ref: './definitions.yaml#/components/schemas/responses/PaymentResponse'

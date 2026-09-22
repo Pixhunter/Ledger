@@ -1,0 +1,72 @@
+components:
+  schemas:
+    requests:
+      PaymentRequest:
+        type: object
+        required:
+          - requestId
+          - merchantId
+          - customerId
+          - amount
+          - currency
+        properties:
+          requestId:
+            $ref: '#/components/schemas/Id'
+          merchantId:
+            $ref: '#/components/schemas/Id'
+          customerId:
+            $ref: '#/components/schemas/Id'
+          amount:
+            $ref: '#/components/schemas/Amount'
+          currency:
+            $ref: '#/components/schemas/Currency'
+
+
+##-------------------------------------------------------------------------
+##---------       RESPONSES             -----------------------------------
+##-------------------------------------------------------------------------
+    responses:
+      PaymentResponse:
+        type: object
+        required: [ state ]
+        properties:
+          error:
+            $ref: '#/components/schemas/Error'
+          state:
+            $ref: '#/components/schemas/Status'
+
+
+##-------------------------------------------------------------------------
+##---------       ENTITIES              -----------------------------------
+##-------------------------------------------------------------------------
+    Id:
+      description: RFC 4122 UUID in canonical lowercase form, carried as a string.
+      type: string
+      format: uuid
+      minLength: 36
+      maxLength: 36
+      pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+      examples: [ 0b7a2c14-8f3e-4d16-9c5a-2e7b41d0f9a3 ]
+
+    Error:
+      description: Error in response
+      type: string
+
+    Status:
+      description: State machine result
+      type: string
+      enum: [ DONE, FAILED, IN_PROGRESS ]
+      examples: [ DONE ]
+
+    Currency:
+      description: Currency in alphabetic format (ISO 4217)
+      type: string
+      pattern: '^[A-Z]{3}$'
+      examples: [ EUR ]
+
+    Amount:
+      description: Money amount
+      type: integer
+      format: int64
+      minimum: 1
+      examples: [ 10000 ]

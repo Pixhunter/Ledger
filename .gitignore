@@ -1,5 +1,6 @@
 .gradle
 build/
+src/generated
 !gradle/wrapper/gradle-wrapper.jar
 !**/src/main/**/build/
 !**/src/test/**/build/
@@ -43,6 +44,5 @@ bin/
 
 ### Mac OS ###
 .DS_Store
-
 
 readme_task.md

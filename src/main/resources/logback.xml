@@ -1,0 +1,26 @@
+<configuration>
+
+    <!-- %logger{0} prints the simple class name and never truncates it.
+         %logger{20} (the old setting) abbreviates package segments once the
+         name passes 20 characters, which is why messages looked cut. -->
+    <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d{HH:mm:ss.SSS} %highlight(%-5level) %cyan(%logger{0}) - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <root level="INFO">
+        <appender-ref ref="STDOUT"/>
+    </root>
+
+    <!-- Noisy libraries: raise their level rather than filtering messages. -->
+    <logger name="io.netty" level="WARN"/>
+    <logger name="io.ktor" level="INFO"/>
+    <logger name="org.jooq" level="WARN"/>
+    <logger name="org.flywaydb" level="INFO"/>
+    <logger name="com.zaxxer.hikari" level="WARN"/>
+
+    <!-- Your own packages, tune freely. -->
+    <logger name="org.example" level="DEBUG"/>
+
+</configuration>
