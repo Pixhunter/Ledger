@@ -9,4 +9,5 @@ data class PaymentRequestDto(
     val customerId: String,
     val amount: Long,
     val currency: String,
+    val taxLocation: TaxLocationDto,
 )

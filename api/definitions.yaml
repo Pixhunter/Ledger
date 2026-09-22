@@ -9,6 +9,7 @@ components:
           - customerId
           - amount
           - currency
+          - taxLocation
         properties:
           requestId:
             $ref: '#/components/schemas/Id'
@@ -20,6 +21,8 @@ components:
             $ref: '#/components/schemas/Amount'
           currency:
             $ref: '#/components/schemas/Currency'
+          taxLocation:
+            $ref: '#/components/schemas/TaxLocation'
 
 
 ##-------------------------------------------------------------------------
@@ -70,3 +73,52 @@ components:
       format: int64
       minimum: 1
       examples: [ 10000 ]
+
+    TaxLocation:
+      description: |
+        Where the sale is taxed. Comes from the customer, not the merchant -
+        tax follows the buyer. Captured per payment and stored immutably: a
+        customer moving must not change the jurisdiction of a past sale.
+      type: object
+      required: [ country ]
+      properties:
+        country:
+          description: ISO 3166-1 alpha-2, uppercase.
+          type: string
+          pattern: '^[A-Z]{2}$'
+          examples: [ DE ]
+        subdivision:
+          description: ISO 3166-2 code without the country prefix. Needed for US states, Canadian provinces, Brazilian states.
+          type: string
+          pattern: '^[A-Z0-9]{1,3}$'
+          examples: [ CA ]
+        postalCode:
+          description: US sales tax rates can vary by district, not only by state.
+          type: string
+          examples: [ '94107' ]
+        taxId:
+          description: VAT number or ABN. Its presence is what triggers B2B reverse charge.
+          type: string
+          examples: [ DE123456789 ]
+        customerType:
+          type: string
+          enum: [ INDIVIDUAL, BUSINESS ]
+          default: INDIVIDUAL
+        evidence:
+          description: |
+            What proved the country. EU rules require two non-contradictory
+            pieces, retained in case a tax authority asks years later.
+          type: array
+          items:
+            $ref: '#/components/schemas/TaxEvidence'
+
+    TaxEvidence:
+      type: object
+      required: [ type, value ]
+      properties:
+        type:
+          type: string
+          enum: [ BILLING_ADDRESS, IP_COUNTRY, CARD_BIN, PHONE_CODE ]
+        value:
+          type: string
+          examples: [ DE ]

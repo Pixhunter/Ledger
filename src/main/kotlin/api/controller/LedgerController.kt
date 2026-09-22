@@ -3,6 +3,7 @@ package org.example.api.controller
 import org.example.api.model.PaymentRequestDto
 import org.example.api.model.PaymentResponseDto
 import org.example.statemachine.StateMachineService
+import org.example.statemachine.payment.PaymentStates
 import org.example.toModel
 import org.slf4j.LoggerFactory
 
@@ -12,6 +13,11 @@ class LedgerController(
     private val log = LoggerFactory.getLogger(LedgerController::class.java)
 
     suspend fun createPayment(body: PaymentRequestDto): PaymentResponseDto {
+        if (body.amount <= 0 ) return PaymentResponseDto(
+            state = PaymentStates.FAILURE.id,
+            error = "Amount must be greater than or equal to zero."
+        )
+
         val payment = body.toModel()
         log.info("capture requestId=${payment.requestId} merchantId=${payment.merchantId}")
 

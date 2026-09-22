@@ -35,6 +35,14 @@ paths:
               customerId: c93e7a5b-1204-4f6d-8e91-7b3ad5c02e48
               amount: 10000
               currency: EUR
+              taxLocation:
+                country: DE
+                customerType: INDIVIDUAL
+                evidence:
+                  - type: BILLING_ADDRESS
+                    value: DE
+                  - type: IP_COUNTRY
+                    value: DE
 
       responses:
         '200':

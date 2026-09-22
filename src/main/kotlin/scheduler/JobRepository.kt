@@ -1,6 +1,6 @@
 package org.example.scheduler
 
-import org.example.statemachine.models.ClaimedTask
+import org.example.statemachine.general.models.ClaimedTask
 import org.example.statemachine.payment.PaymentStates
 import java.time.Instant
 

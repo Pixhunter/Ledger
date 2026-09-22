@@ -1,4 +1,4 @@
-package org.example.statemachine
+package org.example.scheduler
 
 /**
  * Retryable vs permanent is the only distinction the runner needs: one costs

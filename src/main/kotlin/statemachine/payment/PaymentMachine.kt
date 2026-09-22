@@ -3,8 +3,8 @@ package org.example.statemachine.payment
 import org.slf4j.LoggerFactory
 import org.example.db.Mapper
 import org.example.model.PaymentModel
-import org.example.statemachine.Permanent
-import org.example.statemachine.models.ClaimedTask
+import org.example.scheduler.Permanent
+import org.example.statemachine.general.models.ClaimedTask
 
 /**
  * One transition per call. No loops, no retry logic, no sleeping: the runner

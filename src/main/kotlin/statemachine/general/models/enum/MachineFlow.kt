@@ -1,4 +1,4 @@
-package org.example.statemachine.models.enum
+package org.example.statemachine.general.models.enum
 
 import org.example.model.EnumId
 

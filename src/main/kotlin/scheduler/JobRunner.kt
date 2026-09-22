@@ -6,9 +6,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import org.example.statemachine.Permanent
-import org.example.statemachine.Retryable
-import org.example.statemachine.models.ClaimedTask
+import org.example.statemachine.general.models.ClaimedTask
 import org.example.statemachine.payment.PaymentMachine
 import org.example.statemachine.payment.PaymentStates
 import org.example.uuid

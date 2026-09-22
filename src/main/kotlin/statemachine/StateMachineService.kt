@@ -2,7 +2,7 @@ package org.example.statemachine
 
 import org.example.api.model.PaymentResponseDto
 import org.example.model.PaymentModel
-import org.example.statemachine.models.enum.MachineFlow
+import org.example.statemachine.general.models.enum.MachineFlow
 import org.example.statemachine.payment.PaymentStates
 import org.slf4j.LoggerFactory
 

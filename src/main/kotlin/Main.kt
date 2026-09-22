@@ -21,7 +21,7 @@ import org.example.scheduler.JobRunner
 import org.example.statemachine.StateMachineService
 import org.example.statemachine.payment.PaymentMachine
 import org.example.scheduler.repository.JooqJobRepository
-import org.example.statemachine.repository.JooqTaskRepository
+import org.example.statemachine.general.repository.JooqTaskRepository
 import org.slf4j.LoggerFactory
 
 private val log = LoggerFactory.getLogger("Main")

@@ -1,4 +1,4 @@
-package org.example.statemachine.repository
+package org.example.statemachine.general.repository
 
 import org.example.db.Mapper
 import org.example.db.insertTaskState
@@ -6,8 +6,8 @@ import org.example.db.io
 import org.example.db.toPaymentState
 import org.example.jooq.tables.references.TASK
 import org.example.statemachine.TaskRepository
-import org.example.statemachine.models.enum.MachineFlow
-import org.example.statemachine.models.enum.Status
+import org.example.statemachine.general.models.enum.MachineFlow
+import org.example.statemachine.general.models.enum.Status
 import org.example.statemachine.payment.PaymentStates
 import org.jooq.DSLContext
 import org.jooq.impl.DSL

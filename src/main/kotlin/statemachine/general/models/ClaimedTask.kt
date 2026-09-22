@@ -1,6 +1,6 @@
-package org.example.statemachine.models
+package org.example.statemachine.general.models
 
-import org.example.statemachine.models.enum.MachineFlow
+import org.example.statemachine.general.models.enum.MachineFlow
 import org.example.statemachine.payment.PaymentStates
 
 /**
