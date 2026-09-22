@@ -1,6 +1,9 @@
 package org.example.ledger.repository
 
 import org.example.db.io
+import org.example.jooq.tables.references.ENTRY
+import org.example.jooq.tables.references.MERCHANT_BALANCE
+import org.example.jooq.tables.references.TAX_LIABILITY
 import org.example.ledger.AccountBalance
 import org.example.ledger.LedgerEntry
 import org.example.ledger.LedgerRepository
@@ -9,15 +12,18 @@ import org.example.ledger.TaxLiability
 import org.example.model.enums.Currency
 import org.jooq.DSLContext
 import org.jooq.impl.DSL
-import org.jooq.impl.SQLDataType
 import org.slf4j.LoggerFactory
+import java.math.BigDecimal
 import java.time.ZoneOffset
 
 /**
- * Plain-SQL against ledger.entry rather than generated classes: the ledger
- * schema arrives in V3, and regenerating jOOQ requires a live database with
- * V3 already applied. Run ./scripts/jooq-generate.sh afterwards and these can
- * become typed like the task repository.
+ * Typed against the generated ENTRY table and the two report views.
+ *
+ * The plain-SQL version needed an explicit ?::timestamptz cast, because a
+ * string-bound parameter carries no type and Postgres would not coerce it.
+ * With generated fields the type travels with the column, so that whole class
+ * of bug cannot occur - and renaming a column breaks the build instead of a
+ * request.
  */
 class JooqLedgerRepository(private val dsl: DSLContext) : LedgerRepository {
 
@@ -36,16 +42,22 @@ class JooqLedgerRepository(private val dsl: DSLContext) : LedgerRepository {
         dsl.transactionResult { cfg ->
             val db = DSL.using(cfg)
 
-            var inserted = 0
+            // One multi-row insert rather than a statement per entry: fewer
+            // round trips, and the whole transaction lands or none of it does.
+            var insert = db.insertInto(
+                ENTRY,
+                ENTRY.TRANSACTION_ID,
+                ENTRY.REQUEST_ID,
+                ENTRY.KIND,
+                ENTRY.ACCOUNT,
+                ENTRY.AMOUNT,
+                ENTRY.CURRENCY,
+                ENTRY.JURISDICTION,
+                ENTRY.OCCURRED_AT,
+            )
+
             entries.forEach { e ->
-                inserted += db.query(
-                    """
-                    INSERT INTO ledger.entry
-                        (transaction_id, request_id, kind, account,
-                         amount, currency, jurisdiction, occurred_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT (request_id, account) DO NOTHING
-                    """.trimIndent(),
+                insert = insert.values(
                     e.transactionId,
                     e.requestId,
                     e.kind.name,
@@ -54,76 +66,80 @@ class JooqLedgerRepository(private val dsl: DSLContext) : LedgerRepository {
                     e.currency.name,
                     e.jurisdiction,
                     e.occurredAt.atOffset(ZoneOffset.UTC),
-                ).execute()
+                )
             }
 
-            if (inserted == 0) {
-                log.info("replay of ${entries.first().requestId}, nothing posted")
-                false
-            } else {
-                // A partial insert would mean the transaction no longer
-                // balances - refuse it rather than commit a broken ledger.
-                check(inserted == entries.size) {
-                    "partial post for ${entries.first().requestId}: $inserted of ${entries.size}"
+            val inserted = insert
+                .onConflict(ENTRY.REQUEST_ID, ENTRY.ACCOUNT)
+                .doNothing()
+                .execute()
+
+            when (inserted) {
+                0 -> {
+                    log.info("replay of {}, nothing posted", entries.first().requestId)
+                    false
                 }
-                true
+
+                entries.size -> true
+
+                // A partial insert would leave the transaction unbalanced.
+                // Refuse rather than commit a ledger that does not add up.
+                else -> error(
+                    "partial post for ${entries.first().requestId}: $inserted of ${entries.size}"
+                )
             }
         }
     }
 
     override suspend fun taxLiabilities(): List<TaxLiability> = io {
-        dsl.fetch(
-            """
-            SELECT jurisdiction, currency, -SUM(amount) AS owed
-            FROM ledger.entry
-            WHERE account LIKE 'tax:%'
-            GROUP BY jurisdiction, currency
-            ORDER BY jurisdiction, currency
-            """.trimIndent()
-        ).map { r ->
-            TaxLiability(
-                jurisdiction = r.get("jurisdiction", String::class.java),
-                currency = Currency.valueOf(r.get("currency", String::class.java)),
-                owed = r.get("owed", Long::class.java),
-            )
-        }
+        dsl.select(TAX_LIABILITY.JURISDICTION, TAX_LIABILITY.CURRENCY, TAX_LIABILITY.OWED)
+            .from(TAX_LIABILITY)
+            .orderBy(TAX_LIABILITY.JURISDICTION, TAX_LIABILITY.CURRENCY)
+            .fetch()
+            .map { r ->
+                TaxLiability(
+                    jurisdiction = r[TAX_LIABILITY.JURISDICTION].orEmpty(),
+                    currency = Currency.valueOf(r[TAX_LIABILITY.CURRENCY]!!),
+                    owed = r[TAX_LIABILITY.OWED].toMinorUnits(),
+                )
+            }
     }
 
     override suspend fun merchantBalances(): List<MerchantBalance> = io {
-        dsl.fetch(
-            """
-            SELECT split_part(account, ':', 2) AS merchant_id,
-                   currency,
-                   -SUM(amount) AS owed
-            FROM ledger.entry
-            WHERE account LIKE 'merchant:%'
-            GROUP BY split_part(account, ':', 2), currency
-            ORDER BY 1, 2
-            """.trimIndent()
-        ).map { r ->
-            MerchantBalance(
-                merchantId = r.get("merchant_id", String::class.java),
-                currency = Currency.valueOf(r.get("currency", String::class.java)),
-                owed = r.get("owed", Long::class.java),
-            )
-        }
+        dsl.select(MERCHANT_BALANCE.MERCHANT_ID, MERCHANT_BALANCE.CURRENCY, MERCHANT_BALANCE.OWED)
+            .from(MERCHANT_BALANCE)
+            .orderBy(MERCHANT_BALANCE.MERCHANT_ID, MERCHANT_BALANCE.CURRENCY)
+            .fetch()
+            .map { r ->
+                MerchantBalance(
+                    merchantId = r[MERCHANT_BALANCE.MERCHANT_ID].orEmpty(),
+                    currency = Currency.valueOf(r[MERCHANT_BALANCE.CURRENCY]!!),
+                    owed = r[MERCHANT_BALANCE.OWED].toMinorUnits(),
+                )
+            }
     }
 
     override suspend fun balance(account: String): List<AccountBalance> = io {
-        dsl.select(
-            DSL.field("currency", SQLDataType.VARCHAR),
-            DSL.sum(DSL.field("amount", SQLDataType.BIGINT)).`as`("balance"),
-        )
-            .from(DSL.table("ledger.entry"))
-            .where(DSL.field("account", SQLDataType.VARCHAR).eq(account))
-            .groupBy(DSL.field("currency", SQLDataType.VARCHAR))
+        val total = DSL.sum(ENTRY.AMOUNT)
+
+        dsl.select(ENTRY.CURRENCY, total)
+            .from(ENTRY)
+            .where(ENTRY.ACCOUNT.eq(account))
+            .groupBy(ENTRY.CURRENCY)
             .fetch()
             .map { r ->
                 AccountBalance(
                     account = account,
-                    currency = Currency.valueOf(r.get("currency", String::class.java)),
-                    balance = r.get("balance", Long::class.java),
+                    currency = Currency.valueOf(r[ENTRY.CURRENCY]!!),
+                    balance = r[total].toMinorUnits(),
                 )
             }
     }
+
+    /**
+     * SUM() over a bigint comes back as numeric in Postgres, so jOOQ hands us
+     * a BigDecimal. Amounts are minor units and always whole, so this is exact
+     * rather than a rounding decision.
+     */
+    private fun BigDecimal?.toMinorUnits(): Long = this?.toLong() ?: 0L
 }
