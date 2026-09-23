@@ -5,7 +5,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict 2lAiTYoblmNOhdg2xD0wEgTo6yK2VtMijlt2TPyAGdBEZG6BaYAYxEQrNq4qWxL
+\restrict abMlnb7GBkvL6hw8SSewQBD2nGadBFBYp9eMfdTfLmzSoyQcfk3Kdd3hMtB1Wyx
 
 -- Dumped from database version 17.11
 -- Dumped by pg_dump version 17.11
@@ -23,10 +23,10 @@ SET client_min_messages = warning;
 SET row_security = off;
 
 --
--- Name: ledger; Type: SCHEMA; Schema: -; Owner: -
+-- Name: mor; Type: SCHEMA; Schema: -; Owner: -
 --
 
-CREATE SCHEMA ledger;
+CREATE SCHEMA mor;
 
 
 SET default_tablespace = '';
@@ -34,29 +34,28 @@ SET default_tablespace = '';
 SET default_table_access_method = heap;
 
 --
--- Name: entry; Type: TABLE; Schema: ledger; Owner: -
+-- Name: ledger_entry; Type: TABLE; Schema: mor; Owner: -
 --
 
-CREATE TABLE ledger.entry (
+CREATE TABLE mor.ledger_entry (
     id bigint NOT NULL,
-    transaction_id text NOT NULL,
-    request_id text NOT NULL,
-    kind text NOT NULL,
-    account text NOT NULL,
+    transaction_id uuid NOT NULL,
+    account_type text NOT NULL,
+    account_key text,
     amount bigint NOT NULL,
     currency text NOT NULL,
-    jurisdiction text,
-    occurred_at timestamp with time zone DEFAULT now() NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL
+    CONSTRAINT ledger_entry_account_ck CHECK ((account_type = ANY (ARRAY['PSP'::text, 'TAX'::text, 'REVENUE'::text, 'MERCHANT'::text, 'HELD'::text]))),
+    CONSTRAINT ledger_entry_amount_ck CHECK ((amount <> 0)),
+    CONSTRAINT ledger_entry_currency_ck CHECK ((currency ~ '^[A-Z]{3}$'::text))
 );
 
 
 --
--- Name: entry_id_seq; Type: SEQUENCE; Schema: ledger; Owner: -
+-- Name: ledger_entry_id_seq; Type: SEQUENCE; Schema: mor; Owner: -
 --
 
-ALTER TABLE ledger.entry ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
-    SEQUENCE NAME ledger.entry_id_seq
+ALTER TABLE mor.ledger_entry ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME mor.ledger_entry_id_seq
     START WITH 1
     INCREMENT BY 1
     NO MINVALUE
@@ -66,70 +65,268 @@ ALTER TABLE ledger.entry ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
 
 
 --
--- Name: merchant_balance; Type: VIEW; Schema: ledger; Owner: -
+-- Name: ledger_transaction; Type: TABLE; Schema: mor; Owner: -
 --
 
-CREATE VIEW ledger.merchant_balance AS
- SELECT split_part(account, ':'::text, 2) AS merchant_id,
-    currency,
-    (- sum(amount)) AS owed
-   FROM ledger.entry
-  WHERE (account ~~ 'merchant:%'::text)
-  GROUP BY (split_part(account, ':'::text, 2)), currency;
-
-
---
--- Name: tax_liability; Type: VIEW; Schema: ledger; Owner: -
---
-
-CREATE VIEW ledger.tax_liability AS
- SELECT jurisdiction,
-    currency,
-    (- sum(amount)) AS owed
-   FROM ledger.entry
-  WHERE (account ~~ 'tax:%'::text)
-  GROUP BY jurisdiction, currency;
+CREATE TABLE mor.ledger_transaction (
+    id uuid NOT NULL,
+    type text NOT NULL,
+    payment_id uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT ledger_transaction_type_ck CHECK ((type = ANY (ARRAY['CAPTURE'::text, 'REFUND'::text, 'RELEASE'::text, 'PAYOUT'::text])))
+);
 
 
 --
--- Name: entry entry_pkey; Type: CONSTRAINT; Schema: ledger; Owner: -
+-- Name: merchant; Type: TABLE; Schema: mor; Owner: -
 --
 
-ALTER TABLE ONLY ledger.entry
-    ADD CONSTRAINT entry_pkey PRIMARY KEY (id);
-
-
---
--- Name: entry_account_idx; Type: INDEX; Schema: ledger; Owner: -
---
-
-CREATE INDEX entry_account_idx ON ledger.entry USING btree (account, currency);
-
-
---
--- Name: entry_idempotency_idx; Type: INDEX; Schema: ledger; Owner: -
---
-
-CREATE UNIQUE INDEX entry_idempotency_idx ON ledger.entry USING btree (request_id, account);
+CREATE TABLE mor.merchant (
+    id uuid NOT NULL,
+    name text NOT NULL,
+    currency text NOT NULL,
+    fee_rate_bps integer NOT NULL,
+    tax_category text NOT NULL,
+    status text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT merchant_currency_ck CHECK ((currency ~ '^[A-Z]{3}$'::text)),
+    CONSTRAINT merchant_fee_rate_ck CHECK (((fee_rate_bps >= 0) AND (fee_rate_bps <= 10000))),
+    CONSTRAINT merchant_status_ck CHECK ((status = ANY (ARRAY['ACTIVE'::text, 'SUSPENDED'::text]))),
+    CONSTRAINT merchant_tax_category_ck CHECK ((tax_category = ANY (ARRAY['STANDARD'::text, 'REDUCED'::text])))
+);
 
 
 --
--- Name: entry_jurisdiction_idx; Type: INDEX; Schema: ledger; Owner: -
+-- Name: merchant_payment_details; Type: TABLE; Schema: mor; Owner: -
 --
 
-CREATE INDEX entry_jurisdiction_idx ON ledger.entry USING btree (jurisdiction, currency, occurred_at) WHERE (jurisdiction IS NOT NULL);
+CREATE TABLE mor.merchant_payment_details (
+    merchant_id uuid NOT NULL,
+    account_holder text NOT NULL,
+    iban text,
+    bic text,
+    account_number text,
+    routing_code text,
+    bank_country text NOT NULL,
+    address jsonb NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT mpd_bank_country_ck CHECK ((bank_country ~ '^[A-Z]{2}$'::text)),
+    CONSTRAINT mpd_identifiers_ck CHECK (((iban IS NOT NULL) OR ((account_number IS NOT NULL) AND (routing_code IS NOT NULL))))
+);
 
 
 --
--- Name: entry_transaction_idx; Type: INDEX; Schema: ledger; Owner: -
+-- Name: payment; Type: TABLE; Schema: mor; Owner: -
 --
 
-CREATE INDEX entry_transaction_idx ON ledger.entry USING btree (transaction_id);
+CREATE TABLE mor.payment (
+    id uuid NOT NULL,
+    psp_reference text NOT NULL,
+    merchant_id uuid,
+    gross bigint NOT NULL,
+    tax bigint NOT NULL,
+    fee bigint NOT NULL,
+    merchant_net bigint NOT NULL,
+    currency text NOT NULL,
+    tax_country text,
+    tax_category text,
+    tax_rate_bps integer,
+    reverse_charge boolean DEFAULT false NOT NULL,
+    evidence jsonb NOT NULL,
+    status text NOT NULL,
+    hold_reason text,
+    captured_at timestamp with time zone NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT payment_amounts_ck CHECK (((gross > 0) AND (tax >= 0) AND (fee >= 0) AND (merchant_net >= 0))),
+    CONSTRAINT payment_country_ck CHECK (((tax_country IS NULL) OR (tax_country ~ '^[A-Z]{2}$'::text))),
+    CONSTRAINT payment_currency_ck CHECK ((currency ~ '^[A-Z]{3}$'::text)),
+    CONSTRAINT payment_hold_ck CHECK (((status = 'HELD'::text) = (hold_reason IS NOT NULL))),
+    CONSTRAINT payment_split_ck CHECK ((gross = ((tax + fee) + merchant_net))),
+    CONSTRAINT payment_status_ck CHECK ((status = ANY (ARRAY['POSTED'::text, 'HELD'::text, 'FAILED'::text])))
+);
+
+
+--
+-- Name: payout; Type: TABLE; Schema: mor; Owner: -
+--
+
+CREATE TABLE mor.payout (
+    merchant_id uuid NOT NULL,
+    payout_date date NOT NULL,
+    amount bigint NOT NULL,
+    currency text NOT NULL,
+    ledger_transaction_id uuid NOT NULL,
+    status text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT payout_amount_ck CHECK ((amount > 0)),
+    CONSTRAINT payout_currency_ck CHECK ((currency ~ '^[A-Z]{3}$'::text)),
+    CONSTRAINT payout_status_ck CHECK ((status = ANY (ARRAY['COMPUTED'::text, 'SENT'::text, 'CONFIRMED'::text])))
+);
+
+
+--
+-- Name: tax_rate; Type: TABLE; Schema: mor; Owner: -
+--
+
+CREATE TABLE mor.tax_rate (
+    country text NOT NULL,
+    category text NOT NULL,
+    valid_from date NOT NULL,
+    rate_bps integer NOT NULL,
+    CONSTRAINT tax_rate_bps_ck CHECK (((rate_bps >= 0) AND (rate_bps <= 10000))),
+    CONSTRAINT tax_rate_category_ck CHECK ((category = ANY (ARRAY['STANDARD'::text, 'REDUCED'::text]))),
+    CONSTRAINT tax_rate_country_ck CHECK ((country ~ '^[A-Z]{2}$'::text))
+);
+
+
+--
+-- Name: ledger_entry ledger_entry_pkey; Type: CONSTRAINT; Schema: mor; Owner: -
+--
+
+ALTER TABLE ONLY mor.ledger_entry
+    ADD CONSTRAINT ledger_entry_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: ledger_transaction ledger_transaction_pkey; Type: CONSTRAINT; Schema: mor; Owner: -
+--
+
+ALTER TABLE ONLY mor.ledger_transaction
+    ADD CONSTRAINT ledger_transaction_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: merchant_payment_details merchant_payment_details_pkey; Type: CONSTRAINT; Schema: mor; Owner: -
+--
+
+ALTER TABLE ONLY mor.merchant_payment_details
+    ADD CONSTRAINT merchant_payment_details_pkey PRIMARY KEY (merchant_id);
+
+
+--
+-- Name: merchant merchant_pkey; Type: CONSTRAINT; Schema: mor; Owner: -
+--
+
+ALTER TABLE ONLY mor.merchant
+    ADD CONSTRAINT merchant_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: payment payment_pkey; Type: CONSTRAINT; Schema: mor; Owner: -
+--
+
+ALTER TABLE ONLY mor.payment
+    ADD CONSTRAINT payment_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: payout payout_pkey; Type: CONSTRAINT; Schema: mor; Owner: -
+--
+
+ALTER TABLE ONLY mor.payout
+    ADD CONSTRAINT payout_pkey PRIMARY KEY (merchant_id, payout_date);
+
+
+--
+-- Name: tax_rate tax_rate_pkey; Type: CONSTRAINT; Schema: mor; Owner: -
+--
+
+ALTER TABLE ONLY mor.tax_rate
+    ADD CONSTRAINT tax_rate_pkey PRIMARY KEY (country, category, valid_from);
+
+
+--
+-- Name: ledger_entry_account_idx; Type: INDEX; Schema: mor; Owner: -
+--
+
+CREATE INDEX ledger_entry_account_idx ON mor.ledger_entry USING btree (account_type, account_key, currency);
+
+
+--
+-- Name: ledger_entry_transaction_idx; Type: INDEX; Schema: mor; Owner: -
+--
+
+CREATE INDEX ledger_entry_transaction_idx ON mor.ledger_entry USING btree (transaction_id);
+
+
+--
+-- Name: ledger_transaction_payment_idx; Type: INDEX; Schema: mor; Owner: -
+--
+
+CREATE INDEX ledger_transaction_payment_idx ON mor.ledger_transaction USING btree (payment_id);
+
+
+--
+-- Name: payment_held_idx; Type: INDEX; Schema: mor; Owner: -
+--
+
+CREATE INDEX payment_held_idx ON mor.payment USING btree (status) WHERE (status = 'HELD'::text);
+
+
+--
+-- Name: payment_merchant_idx; Type: INDEX; Schema: mor; Owner: -
+--
+
+CREATE INDEX payment_merchant_idx ON mor.payment USING btree (merchant_id, captured_at);
+
+
+--
+-- Name: payment_psp_reference_uk; Type: INDEX; Schema: mor; Owner: -
+--
+
+CREATE UNIQUE INDEX payment_psp_reference_uk ON mor.payment USING btree (psp_reference);
+
+
+--
+-- Name: payout_date_idx; Type: INDEX; Schema: mor; Owner: -
+--
+
+CREATE INDEX payout_date_idx ON mor.payout USING btree (payout_date);
+
+
+--
+-- Name: ledger_entry ledger_entry_transaction_id_fkey; Type: FK CONSTRAINT; Schema: mor; Owner: -
+--
+
+ALTER TABLE ONLY mor.ledger_entry
+    ADD CONSTRAINT ledger_entry_transaction_id_fkey FOREIGN KEY (transaction_id) REFERENCES mor.ledger_transaction(id);
+
+
+--
+-- Name: ledger_transaction ledger_transaction_payment_id_fkey; Type: FK CONSTRAINT; Schema: mor; Owner: -
+--
+
+ALTER TABLE ONLY mor.ledger_transaction
+    ADD CONSTRAINT ledger_transaction_payment_id_fkey FOREIGN KEY (payment_id) REFERENCES mor.payment(id);
+
+
+--
+-- Name: merchant_payment_details merchant_payment_details_merchant_id_fkey; Type: FK CONSTRAINT; Schema: mor; Owner: -
+--
+
+ALTER TABLE ONLY mor.merchant_payment_details
+    ADD CONSTRAINT merchant_payment_details_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES mor.merchant(id);
+
+
+--
+-- Name: payout payout_ledger_transaction_id_fkey; Type: FK CONSTRAINT; Schema: mor; Owner: -
+--
+
+ALTER TABLE ONLY mor.payout
+    ADD CONSTRAINT payout_ledger_transaction_id_fkey FOREIGN KEY (ledger_transaction_id) REFERENCES mor.ledger_transaction(id);
+
+
+--
+-- Name: payout payout_merchant_id_fkey; Type: FK CONSTRAINT; Schema: mor; Owner: -
+--
+
+ALTER TABLE ONLY mor.payout
+    ADD CONSTRAINT payout_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES mor.merchant(id);
 
 
 --
 -- PostgreSQL database dump complete
 --
 
-\unrestrict 2lAiTYoblmNOhdg2xD0wEgTo6yK2VtMijlt2TPyAGdBEZG6BaYAYxEQrNq4qWxL
+\unrestrict abMlnb7GBkvL6hw8SSewQBD2nGadBFBYp9eMfdTfLmzSoyQcfk3Kdd3hMtB1Wyx
 

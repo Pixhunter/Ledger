@@ -11,6 +11,8 @@ import java.io.File
 data class AppConfig(
     val server: ServerConfig = ServerConfig(),
     val database: DatabaseConfig = DatabaseConfig(),
+    val mor: MorConfig = MorConfig(),
+    val psp: PspConfig = PspConfig(),
 ) {
     companion object {
 
@@ -41,6 +43,13 @@ data class AppConfig(
                 port = env("SERVER_PORT")?.toInt() ?: server.port,
                 publicUrl = env("SERVER_PUBLIC_URL") ?: server.publicUrl,
             ),
+            mor = mor.copy(
+                country = env("MOR_COUNTRY") ?: mor.country,
+                feeBasisPoints = env("MOR_FEE_BP")?.toInt() ?: mor.feeBasisPoints,
+            ),
+            psp = psp.copy(
+                secret = env("PSP_SECRET") ?: psp.secret,
+            ),
             database = database.copy(
                 url = env("DB_URL") ?: database.url,
                 user = env("DB_USER") ?: database.user,
@@ -70,4 +79,18 @@ data class DatabaseConfig(
     val user: String = "ledger",
     val password: String = "ledger",
     val poolSize: Int = 10,
+)
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class MorConfig(
+    /** Country of establishment. Decides domestic vs cross-border B2B. */
+    val country: String = "DE",
+    /** Flat MoR fee on the gross, basis points. 500 = 5.00%. */
+    val feeBasisPoints: Int = 500,
+)
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class PspConfig(
+    /** HMAC secret for capture webhook signatures. Blank disables the check. */
+    val secret: String? = null,
 )

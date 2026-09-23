@@ -1,88 +1,74 @@
 package org.example.api.controller
 
-import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
-import io.ktor.server.request.receive
+import io.ktor.server.request.receiveText
 import io.ktor.server.response.respond
-import io.ktor.server.response.respondText
-import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 import io.ktor.server.routing.routing
+import kotlinx.serialization.json.Json
 import org.example.api.model.PaymentRequestDto
-import org.example.config.ServerConfig
-import java.io.File
+import org.example.api.model.PaymentResponseDto
+import org.example.api.model.FailureReason
+import org.example.api.security.PspSignature
+import org.example.service.PaymentResult
+import org.slf4j.LoggerFactory
 
-fun Application.routes(controller: LedgerController, server: ServerConfig) {
+private val log = LoggerFactory.getLogger("Routes")
+
+/** additionalProperties:false in the spec, so an unknown field is a contract break. */
+private val json = Json { ignoreUnknownKeys = false }
+
+/**
+ * Server-to-server endpoints. Only the PSP calls these, and every one of them
+ * moves money.
+ *
+ * Operational routes (health, Swagger, the spec) live in DevRoutes so the two
+ * can be secured, rate-limited and exposed differently: in production these
+ * sit behind the PSP's IP allowlist and signature, while the dev routes
+ * either stay internal or are switched off entirely.
+ */
+fun Application.apiRoutes(
+    controller: LedgerController,
+    signature: PspSignature,
+) {
     routing {
 
-        get("/health") {
-            call.respond(HttpStatusCode.OK, mapOf("status" to "UP"))
-        }
+        post("/v1/payments/capture") {
+            // Raw body first: the signature covers the exact bytes the PSP
+            // sent. Deserialising and re-encoding would break it.
+            val raw = call.receiveText()
 
-        post("/v1/payment/capture") {
-            val body = call.receive<PaymentRequestDto>()
-            val result = controller.createPayment(body)
-            call.respond(HttpStatusCode.OK, result)
-        }
-
-
-        /**
-         * Swagger UI served by this app, so its origin is this app's port.
-         * Opening api/api.yaml in an IDE preview instead makes the browser
-         * resolve paths against the IDE's own web server (:63342), which is
-         * why requests from there 404.
-         */
-        get("/swagger") {
-            call.respondText(SWAGGER_PAGE, ContentType.Text.Html)
-        }
-
-        /**
-         * The spec is served with its `servers` block injected from config,
-         * so the URL lives in exactly one place. api/api.yaml deliberately
-         * declares no server of its own.
-         */
-        get("/openapi.yaml") {
-            val spec = File("api/api.yaml")
-            if (!spec.isFile) {
-                call.respond(HttpStatusCode.NotFound, "api/api.yaml not found")
-                return@get
+            if (!signature.verify(raw.toByteArray(), call.request.headers[PspSignature.HEADER])) {
+                log.warn("rejected unsigned payment from {}", call.request.local.remoteHost)
+                call.respond(
+                    HttpStatusCode.Unauthorized,
+                    PaymentResponseDto.failed(FailureReason.INVALID_REQUEST),
+                )
+                return@post
             }
 
-            val body = buildString {
-                append(spec.readText().trimEnd())
-                append("\n\nservers:\n  - url: ${server.effectivePublicUrl}\n")
-            }
-            call.respondText(body, ContentType.parse("application/yaml"))
-        }
+            val body = runCatching { json.decodeFromString<PaymentRequestDto>(raw) }
+                .getOrElse { e ->
+                    log.warn("malformed payment body: {}", e.message)
+                    call.respond(
+                        HttpStatusCode.BadRequest,
+                        PaymentResponseDto.failed(FailureReason.INVALID_REQUEST),
+                    )
+                    return@post
+                }
 
-        get("/definitions.yaml") {
-            val defs = File("api/definitions.yaml")
-            if (defs.isFile) {
-                call.respondText(defs.readText(), ContentType.parse("application/yaml"))
-            } else {
-                call.respond(HttpStatusCode.NotFound, "api/definitions.yaml not found")
+            val (result, response) = controller.createPayment(body)
+
+            // 200 means "durably recorded", not "fully processed". A HELD
+            // capture is recorded, so it is a 200 - the PSP must stop
+            // retrying, or we end up with money in the bank and no row.
+            val status = when (result) {
+                is PaymentResult.Rejected -> HttpStatusCode.UnprocessableEntity
+                else -> HttpStatusCode.OK
             }
+
+            call.respond(status, response)
         }
     }
 }
-
-private val SWAGGER_PAGE = """
-<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8">
-    <title>MoR Ledger API</title>
-    <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
-  </head>
-  <body>
-    <div id="ui"></div>
-    <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
-    <script>
-      // Relative url: the spec and the definitions file it references are
-      // both fetched from this same origin.
-      window.ui = SwaggerUIBundle({ url: "/openapi.yaml", dom_id: "#ui" });
-    </script>
-  </body>
-</html>
-"""

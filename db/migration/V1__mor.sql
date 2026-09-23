@@ -1,0 +1,187 @@
+-- MoR ledger schema.
+CREATE SCHEMA IF NOT EXISTS mor;
+
+-- ---------------------------------------------------------------------------
+-- merchant: the business we sell on behalf of.
+-- One merchant = one legal company. Entities in two countries are two rows.
+-- ---------------------------------------------------------------------------
+CREATE TABLE mor.merchant
+(
+    id           uuid        PRIMARY KEY,
+    name         text        NOT NULL,
+    currency     text        NOT NULL,              -- ISO 4217, payout currency
+    fee_rate_bps int         NOT NULL,              -- 300 = 3%; frozen per payment
+    tax_category smallint    NOT NULL,              -- TaxCategory: 1 STANDARD, 2 REDUCED
+    status       smallint    NOT NULL,              -- MerchantStatus: 1 ACTIVE, 2 SUSPENDED
+    created_at   timestamptz NOT NULL DEFAULT now(),
+
+    CONSTRAINT merchant_currency_ck     CHECK (currency ~ '^[A-Z]{3}$'),
+    CONSTRAINT merchant_fee_rate_ck     CHECK (fee_rate_bps BETWEEN 0 AND 10000),
+    CONSTRAINT merchant_tax_category_ck CHECK (tax_category IN (1, 2)),
+    CONSTRAINT merchant_status_ck       CHECK (status IN (1, 2))
+);
+
+
+-- ---------------------------------------------------------------------------
+-- merchant_payment_details: where payouts go. 1:1 with merchant.
+--
+-- Separate table because it is sensitive: encrypted and access-restricted in
+-- production, and no ledger or balance query ever needs to touch it.
+-- Nullable bank identifiers because the required set differs by country:
+-- EU/UK need IBAN + BIC, US needs account + routing, AU needs account + BSB.
+-- ---------------------------------------------------------------------------
+CREATE TABLE mor.merchant_payment_details
+(
+    merchant_id    uuid        PRIMARY KEY REFERENCES mor.merchant (id),
+    account_holder text        NOT NULL,             -- every bank transfer needs it
+    iban           text        NULL,                 -- EU / UK
+    bic            text        NULL,
+    account_number text        NULL,                 -- US / AU
+    routing_code   text        NULL,                 -- US routing number / AU BSB
+    bank_country   text        NOT NULL,             -- may differ from merchant currency
+    address        jsonb       NOT NULL,             -- holder address, international transfers
+    updated_at     timestamptz NOT NULL DEFAULT now(),
+
+    CONSTRAINT mpd_bank_country_ck CHECK (bank_country ~ '^[A-Z]{2}$'),
+    -- Enough to actually pay someone: IBAN, or account + routing.
+    CONSTRAINT mpd_identifiers_ck CHECK (
+        iban IS NOT NULL OR (account_number IS NOT NULL AND routing_code IS NOT NULL)
+    )
+);
+
+
+-- ---------------------------------------------------------------------------
+-- tax_rate: reference data, ~150 countries x 2 categories.
+-- Loaded into memory at startup; never queried per payment.
+--
+-- Append-only: a rate change is a new row with a future valid_from, so old
+-- rows stay for audits and a past payment can always be re-explained.
+-- ---------------------------------------------------------------------------
+CREATE TABLE mor.tax_rate
+(
+    country    text NOT NULL,                        -- ISO 3166-1 alpha-2
+    category   smallint NOT NULL,                    -- TaxCategory: 1 STANDARD, 2 REDUCED
+    valid_from date NOT NULL,                        -- rate applies from this date
+    rate_bps   int  NOT NULL,                        -- 1900 = 19%
+
+    PRIMARY KEY (country, category, valid_from),
+
+    CONSTRAINT tax_rate_country_ck  CHECK (country ~ '^[A-Z]{2}$'),
+    CONSTRAINT tax_rate_category_ck CHECK (category IN (1, 2)),
+    CONSTRAINT tax_rate_bps_ck      CHECK (rate_bps BETWEEN 0 AND 10000)
+);
+
+
+-- ---------------------------------------------------------------------------
+-- payment: one row per PSP capture event. The business fact - what the
+-- customer paid and how it split. Money movement lives in ledger_entry.
+--
+-- Everything except status is frozen at capture: amounts, rate, category,
+-- country. A later rate change or a merchant moving country must never
+-- rewrite history.
+-- ---------------------------------------------------------------------------
+CREATE TABLE mor.payment
+(
+    id             uuid        PRIMARY KEY,
+    psp_reference  text        NOT NULL,             -- idempotency key, PSP's own id
+    merchant_id    uuid        NULL,
+    gross          bigint      NOT NULL,             -- customer paid, tax included
+    tax            bigint      NOT NULL,
+    fee            bigint      NOT NULL,             -- MoR revenue
+    merchant_net   bigint      NOT NULL,
+    currency       text        NOT NULL,
+    tax_country    text        NULL,                 -- result of the evidence vote
+    tax_category   smallint    NULL,                 -- TaxCategory
+    tax_rate_bps   int         NULL,                 -- frozen at capture
+    reverse_charge boolean     NOT NULL DEFAULT false,
+    evidence       jsonb       NOT NULL,             -- {"billing":"ES","card":"AU","ip":"ES","vatId":null}
+    status         smallint    NOT NULL,             -- PaymentStatus: 1 POSTED, 2 HELD, 3 FAILED
+    hold_reason    smallint    NULL,                 -- HoldReason: 1 UNKNOWN_MERCHANT, 2 TAX_UNRESOLVED
+    captured_at    timestamptz NOT NULL,             -- from the PSP: the tax point
+    created_at     timestamptz NOT NULL DEFAULT now(),
+
+    CONSTRAINT payment_split_ck    CHECK (gross = tax + fee + merchant_net),
+    CONSTRAINT payment_amounts_ck  CHECK (gross > 0 AND tax >= 0 AND fee >= 0 AND merchant_net >= 0),
+    CONSTRAINT payment_status_ck   CHECK (status IN (1, 2, 3)),
+    CONSTRAINT payment_hold_ck     CHECK ((status = 2) = (hold_reason IS NOT NULL)),
+    CONSTRAINT payment_currency_ck CHECK (currency ~ '^[A-Z]{3}$'),
+    CONSTRAINT payment_country_ck  CHECK (tax_country IS NULL OR tax_country ~ '^[A-Z]{2}$')
+);
+
+CREATE UNIQUE INDEX payment_psp_reference_uk ON mor.payment (psp_reference);
+CREATE INDEX payment_merchant_idx ON mor.payment (merchant_id, captured_at);
+CREATE INDEX payment_held_idx ON mor.payment (status) WHERE status = 2;
+
+
+-- ---------------------------------------------------------------------------
+-- ledger_transaction: one money event.
+--
+-- Split from ledger_entry so the type and payment id are stored once rather
+-- than repeated on every line. Both inserts still go in one statement.
+-- ---------------------------------------------------------------------------
+CREATE TABLE mor.ledger_transaction
+(
+    id         uuid        PRIMARY KEY,
+    type       smallint    NOT NULL,                 -- LedgerTransactionType: 1 CAPTURE, 2 REFUND, 3 RELEASE, 4 PAYOUT
+    payment_id uuid        NULL REFERENCES mor.payment (id),   -- null for PAYOUT
+    created_at timestamptz NOT NULL DEFAULT now(),
+
+    CONSTRAINT ledger_transaction_type_ck CHECK (type IN (1, 2, 3, 4))
+);
+
+CREATE INDEX ledger_transaction_payment_idx ON mor.ledger_transaction (payment_id);
+
+
+-- ---------------------------------------------------------------------------
+-- ledger_entry: one line = one change in whose money it is.
+--
+-- Append-only. No UPDATE, no DELETE - a mistake is corrected with a new
+-- transaction. That is also why hot accounts do not lock: every capture
+-- touches TAX:DE and REVENUE, but only ever by INSERT.
+--
+-- A ledger account is not a bank account. All money physically sits in the
+-- PSP balance; the account is a label saying who it belongs to.
+-- ---------------------------------------------------------------------------
+CREATE TABLE mor.ledger_entry
+(
+    id             bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    transaction_id uuid   NOT NULL REFERENCES mor.ledger_transaction (id),
+    account_type   smallint NOT NULL,                -- AccountType: 1 PSP, 2 TAX, 3 REVENUE, 4 MERCHANT, 5 HELD
+    account_key    text   NULL,                      -- TAX: country, MERCHANT/HELD: merchant id
+    amount         bigint NOT NULL,                  -- signed: + debit, - credit
+    currency       text   NOT NULL,
+
+    CONSTRAINT ledger_entry_amount_ck   CHECK (amount <> 0),
+    CONSTRAINT ledger_entry_account_ck  CHECK (account_type IN (1, 2, 3, 4, 5)),
+    CONSTRAINT ledger_entry_currency_ck CHECK (currency ~ '^[A-Z]{3}$')
+);
+
+CREATE INDEX ledger_entry_account_idx ON mor.ledger_entry (account_type, account_key, currency);
+CREATE INDEX ledger_entry_transaction_idx ON mor.ledger_entry (transaction_id);
+
+
+-- ---------------------------------------------------------------------------
+-- payout: one per merchant per business day.
+--
+-- The composite primary key IS the idempotency guarantee: a rerun, or two job
+-- instances racing, cannot pay the same merchant twice for the same date.
+-- The job lock is only an optimisation.
+-- ---------------------------------------------------------------------------
+CREATE TABLE mor.payout
+(
+    merchant_id           uuid        NOT NULL REFERENCES mor.merchant (id),
+    payout_date           date        NOT NULL,
+    amount                bigint      NOT NULL,
+    currency              text        NOT NULL,
+    ledger_transaction_id uuid        NOT NULL REFERENCES mor.ledger_transaction (id),
+    status                smallint    NOT NULL,      -- PayoutStatus: 1 COMPUTED, 2 SENT, 3 CONFIRMED
+    created_at            timestamptz NOT NULL DEFAULT now(),
+
+    PRIMARY KEY (merchant_id, payout_date),
+
+    CONSTRAINT payout_amount_ck   CHECK (amount > 0),
+    CONSTRAINT payout_status_ck   CHECK (status IN (1, 2, 3)),
+    CONSTRAINT payout_currency_ck CHECK (currency ~ '^[A-Z]{3}$')
+);
+
+CREATE INDEX payout_date_idx ON mor.payout (payout_date);

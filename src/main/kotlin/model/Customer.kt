@@ -1,8 +1,0 @@
-package org.example.model
-
-import org.example.model.enums.Currency
-
-data class Customer(
-    val currency: Currency,
-    val balance: Balance,
-)

@@ -104,10 +104,7 @@ tasks.register<JavaExec>("jooqCodegen") {
                 <name>org.jooq.codegen.KotlinGenerator</name>
                 <database>
                   <name>org.jooq.meta.postgres.PostgresDatabase</name>
-                  <schemata>
-                    <schema><inputSchema>jobs</inputSchema></schema>
-                    <schema><inputSchema>ledger</inputSchema></schema>
-                  </schemata>
+                  <inputSchema>mor</inputSchema>
                   <includes>.*</includes>
                   <excludes>flyway_schema_history</excludes>
                 </database>

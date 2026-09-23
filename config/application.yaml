@@ -1,19 +1,8 @@
-# Single source of truth for host, port and database connection.
-#
-# Nothing here is repeated anywhere else:
-#   - the app binds server.host/server.port at startup
-#   - the OpenAPI spec is served with its `servers` block injected from
-#     server.publicUrl, so api/api.yaml carries no URL of its own
-#   - Database.kt reads database.* instead of its own defaults
-#
-# Every value can be overridden by the environment variable named beside it,
-# so a deployment never has to ship a different file.
+# Single source of truth for host, port, database and business constants.
 
 server:
   host: 0.0.0.0        # SERVER_HOST
   port: 8081           # SERVER_PORT
-  # URL clients should call. Shown in Swagger. Leave blank to derive
-  # http://localhost:<port>.
   publicUrl:           # SERVER_PUBLIC_URL
 
 database:
@@ -21,3 +10,15 @@ database:
   user: ledger                                   # DB_USER
   password: ledger                               # DB_PASSWORD
   poolSize: 10                                   # DB_POOL_SIZE
+
+mor:
+  # Country of establishment. Decides domestic vs cross-border B2B, so it
+  # decides whether reverse charge applies.
+  country: DE          # MOR_COUNTRY
+  # Flat fee on the gross, basis points. 500 = 5.00%.
+  feeBasisPoints: 500  # MOR_FEE_BP
+
+psp:
+  # HMAC secret for capture webhook signatures. Blank disables verification,
+  # which is fine locally and unacceptable anywhere else.
+  secret:              # PSP_SECRET

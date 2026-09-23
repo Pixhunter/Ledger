@@ -1,39 +1,23 @@
 package org.example.ledger
 
 import org.example.model.enums.Currency
-import java.time.Instant
-
-enum class EntryKind { CAPTURE, REFUND, REMITTANCE, PAYOUT }
 
 /**
- * One posting. Never updated, never deleted - a correction is another entry,
- * so the history always explains the balance.
+ * One line = one change in whose money it is.
+ *
+ * Append-only: never updated, never deleted. A mistake is corrected with a
+ * new transaction, so history always explains the balance - and busy accounts
+ * (TAX:DE, REVENUE) never lock, because nothing ever does UPDATE balance.
  */
 data class LedgerEntry(
-    val transactionId: String,
-    val requestId: String,
-    val kind: EntryKind,
-    val account: String,
-    val amount: Long,            // signed: debit positive, credit negative
+    val accountType: AccountType,
+    /** TAX: country. MERCHANT / HELD: merchant id. PSP / REVENUE: null. */
+    val accountKey: String?,
+    /** Signed: + debit, - credit. Minor units. Sums to zero per transaction. */
+    val amount: Long,
     val currency: Currency,
-    val jurisdiction: String? = null,
-    val occurredAt: Instant,
-)
-
-data class AccountBalance(
-    val account: String,
-    val currency: Currency,
-    val balance: Long,
-)
-
-data class TaxLiability(
-    val jurisdiction: String,
-    val currency: Currency,
-    val owed: Long,
-)
-
-data class MerchantBalance(
-    val merchantId: String,
-    val currency: Currency,
-    val owed: Long,
-)
+) {
+    init {
+        require(amount != 0L) { "a zero entry carries no information" }
+    }
+}

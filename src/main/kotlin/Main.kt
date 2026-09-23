@@ -9,15 +9,19 @@ import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.plugins.statuspages.StatusPages
 import io.ktor.server.response.respond
 import org.example.api.controller.LedgerController
-import org.example.api.controller.routes
+import org.example.api.controller.apiRoutes
+import org.example.api.controller.devRoutes
+import org.example.api.model.PaymentResponseDto
+import org.example.api.model.FailureReason
+import org.example.api.security.PspSignature
 import org.example.config.AppConfig
 import org.example.db.Database
 import org.example.db.Migrations
-import org.example.ledger.repository.JooqLedgerRepository
+import org.example.repository.JooqPaymentRepository
+import org.example.service.InMemoryMerchantRegistry
 import org.example.service.PaymentService
 import org.example.tax.BasisPoints
 import org.example.tax.TaxRates
-import org.example.tax.TaxService
 import org.slf4j.LoggerFactory
 
 private val log = LoggerFactory.getLogger("Main")
@@ -27,31 +31,45 @@ fun main() {
     log.info("config loaded: ${config.server.host}:${config.server.port} -> ${config.database.url}")
 
     val dataSource = Database.dataSource(config.database)
-
-    // Before anything touches a table.
     Migrations.run(dataSource)
 
     val dsl = Database.dslContext(dataSource)
 
-    val ledger = JooqLedgerRepository(dsl)
-    val taxes = TaxService(ledger, TaxRates(), feeRate = BasisPoints(500))
-    val controller = LedgerController(PaymentService(taxes))
+    val paymentRepository = JooqPaymentRepository(dsl)
+    val signature = PspSignature(config.psp.secret)
+    if (!signature.enabled) {
+        log.warn("PSP signature verification is OFF - set psp.secret before anything real")
+    }
+
+    val payments = PaymentService(
+        payments = paymentRepository,
+        rates = TaxRates(),
+        merchants = InMemoryMerchantRegistry(),
+        feeRate = BasisPoints(config.mor.feeBasisPoints),
+        morCountry = config.mor.country,
+    )
+
+    val controller = LedgerController(payments)
 
     embeddedServer(Netty, host = config.server.host, port = config.server.port) {
         install(ContentNegotiation) { json() }
 
         // Validation lives in PaymentModel.from(); this turns its complaint
-        // into a 400 with the reason, instead of a 500 with a stack trace.
+        // into 400 INVALID_REQUEST instead of a 500 with a stack trace.
         install(StatusPages) {
             exception<IllegalArgumentException> { call, cause ->
-                log.warn("bad request: ${cause.message}")
+                log.warn("bad request: {}", cause.message)
                 call.respond(
                     HttpStatusCode.BadRequest,
-                    mapOf("error" to (cause.message ?: "invalid request"))
+                    PaymentResponseDto.failed(FailureReason.INVALID_REQUEST),
                 )
             }
         }
 
-        routes(controller, config.server)
+        apiRoutes(controller, signature)
+
+        // Operational only. Bind elsewhere or drop entirely in production -
+        // nothing here should be reachable from where the PSP calls in.
+        devRoutes(config.server)
     }.start(wait = true)
 }

@@ -4,10 +4,13 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 data class PaymentRequestDto(
-    val requestId: String,
+    val pspReference: String,
     val merchantId: String,
-    val customerId: String,
     val amount: Long,
     val currency: String,
-    val taxLocation: TaxLocationDto,
+    val billingAddress: BillingAddressDto? = null,
+    val cardIssuingCountry: String,
+    val ipCountry: String? = null,
+    val customerVatId: String? = null,
+    val capturedAt: String,
 )

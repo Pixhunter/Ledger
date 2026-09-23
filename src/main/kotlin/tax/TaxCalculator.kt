@@ -5,34 +5,10 @@ import java.math.BigDecimal
 import java.math.RoundingMode
 
 /**
- * The result of splitting one captured payment. All amounts are minor units
- * of the same currency, and by construction:
- *
- *     gross == tax + fee + merchant
- */
-data class Split(
-    val gross: Long,
-    val net: Long,
-    val tax: Long,
-    val fee: Long,
-    val merchant: Long,
-    val currency: Currency,
-    val jurisdiction: String,
-    val taxRate: BasisPoints,
-    val taxMode: TaxMode,
-    val reverseCharge: Boolean,
-) {
-    init {
-        check(gross == tax + fee + merchant) {
-            "split does not reconcile: $gross != $tax + $fee + $merchant"
-        }
-    }
-}
-
-/**
  * Pure arithmetic. No database, no clock, no IO - so every rule below is
  * testable with a plain unit test, which matters more here than anywhere
- * else in the codebase: a bug in this file means money is wrong.
+ * else in the codebase: a bug in this file means money is wrong and a wrong
+ * number gets filed with a government.
  */
 object TaxCalculator {
 
@@ -45,7 +21,7 @@ object TaxCalculator {
      *  - The merchant's share is DERIVED as gross - tax - fee, never rounded
      *    independently. Rounding all three separately leaves a stray cent and
      *    the split stops summing to what the customer actually paid. The
-     *    merchant absorbs the remainder, which is at most one minor unit.
+     *    merchant absorbs the remainder, at most one minor unit.
      */
     fun split(
         amount: Long,
@@ -82,7 +58,6 @@ object TaxCalculator {
             }
         }
 
-        // The MoR fee is charged on the gross
         val fee = BigDecimal(gross).multiply(BigDecimal(feeRate.value))
             .divide(TEN_THOUSAND, 0, RoundingMode.HALF_UP)
             .toLong()

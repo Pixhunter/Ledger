@@ -22,21 +22,42 @@ Service description
 
 ## Diagrams
 ### Payment process
+
 ```mermaid
 sequenceDiagram
-  autonumber
-  participant PSP
-  participant API as Ledger API
-  participant DB as DB
+    autonumber
+    participant PSP
+    participant L as Ledger service
+    participant DB as Database
+    participant R as Review + alerts
 
-  PSP->>API: POST /pay
-  API->>API: validate input
-  API->>API: split: tax / fee / merchant net
-  API->>DB: append balanced entries atomically
-  DB-->>API: committed
-  API-->>PSP: 200 OK
+    PSP->>L: POST /v1/payments/capture
+    L->>L: verify signature, schema
+    alt invalid
+        L-->>PSP: 401 / 400 (nothing saved)
+    end
 
+    alt success = false
+        L->>DB: insert payment FAILED (idempotent)
+        L-->>PSP: 200 (no money posted)
+    end
+
+    L->>L: vote tax country (billing, card, IP)
+    L->>L: rate from config, compute tax + fee + merchantNet
+
+    L->>DB: ONE statement, ONE round trip:<br/>insert payment if pspReference is new<br/>status = POSTED if merchant exists, else HELD<br/>insert ledger entries<br/>return stored row
+    DB-->>L: payment (new or existing)
+
+    alt duplicate
+        L-->>PSP: 200 stored answer
+    else HELD (unknown merchant / tax unresolved)
+        L--)R: alert (async, fire and forget)
+        L-->>PSP: 200 received
+    else POSTED
+        L-->>PSP: 200 received
+    end
 ```
+
 
 
 ----
@@ -281,3 +302,4 @@ silently re-running. Once a migration is pushed, don't edit it: add the next one
 | `No SLF4J providers were found` | stale build — `./gradlew clean run` |
 | no output from `logger.info` | Klogging needs its own sink; configured in `Main.kt` |
 | Flyway validation error | a migration file changed after being applied — see Resetting |
+
