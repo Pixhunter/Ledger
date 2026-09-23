@@ -1,4 +1,4 @@
-package org.example.repository.model
+package org.example.model
 
 import org.example.model.enums.Currency
 import org.example.model.enums.HoldReason

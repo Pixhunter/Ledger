@@ -7,12 +7,13 @@ import io.ktor.server.response.respond
 import io.ktor.server.routing.post
 import io.ktor.server.routing.routing
 import kotlinx.serialization.json.Json
-import org.example.api.model.PaymentRequestDto
-import org.example.api.model.PaymentResponseDto
-import org.example.api.model.FailureReasonDto
+import org.example.api.generated.model.PaymentRequestDto
+import org.example.api.generated.model.PaymentResponseDto
+import org.example.api.generated.model.ErrorReasonDto
 import org.example.api.security.PspSignature
 import org.example.service.PaymentResult
 import org.slf4j.LoggerFactory
+import org.example.api.paymentRejected
 
 private val log = LoggerFactory.getLogger("Routes")
 
@@ -35,7 +36,7 @@ fun Application.apiRoutes(
                 log.warn("rejected unsigned payment from {}", call.request.local.remoteHost)
                 call.respond(
                     HttpStatusCode.Unauthorized,
-                    PaymentResponseDto.failed(FailureReasonDto.INVALID_REQUEST),
+                    paymentRejected(ErrorReasonDto.INVALID_REQUEST),
                 )
                 return@post
             }
@@ -45,7 +46,7 @@ fun Application.apiRoutes(
                     log.warn("malformed payment body: {}", e.message)
                     call.respond(
                         HttpStatusCode.BadRequest,
-                        PaymentResponseDto.failed(FailureReasonDto.INVALID_REQUEST),
+                        paymentRejected(ErrorReasonDto.INVALID_REQUEST),
                     )
                     return@post
                 }

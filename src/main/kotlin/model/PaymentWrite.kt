@@ -1,4 +1,4 @@
-package org.example.ledger
+package org.example.model
 
 import org.example.model.enums.HoldReason
 import org.example.model.enums.PaymentStatus

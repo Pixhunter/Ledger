@@ -3,13 +3,12 @@ package org.example.service
 import java.util.UUID
 
 /**
- * Is this merchant ours?
- *
- * A capture for an unknown merchant is money we hold and cannot attribute.
- * It is never rejected - the PSP has already taken it from the customer, and
- * an error would only make the PSP retry forever while the cash sits
- * unrecorded.
+ * Placeholder until merchants have a table. An empty allowlist accepts
+ * everyone, so the HELD branch stays reachable in tests by configuring one.
  */
-fun interface MerchantRegistry {
-    suspend fun exists(merchantId: UUID): Boolean
+class MerchantRegistry(
+    private val known: Set<UUID> = emptySet(),
+)  {
+    fun exists(merchantId: UUID): Boolean =
+        known.isEmpty() || merchantId in known
 }

@@ -1,3 +1,5 @@
+import java.io.File
+
 plugins {
     kotlin("jvm") version "2.3.21"
     kotlin("plugin.serialization") version "2.3.21"
@@ -20,10 +22,12 @@ val hikariVersion = "6.3.0"
 val testcontainersVersion = "1.21.3"
 val jacksonVersion = "2.19.2"
 val flywayVersion = "11.8.2"
+val openApiGeneratorVersion = "7.11.0"
 
 // Classpath for the code generator only. Kept off the application's own
 // classpath - codegen tooling has no business shipping in the jar.
 val jooqGenerator: Configuration by configurations.creating
+val openApiGenerator: Configuration by configurations.creating
 
 dependencies {
     // HTTP
@@ -58,11 +62,14 @@ dependencies {
     jooqGenerator("org.jooq:jooq-codegen:$jooqVersion")
     jooqGenerator("org.jooq:jooq-meta:$jooqVersion")
     jooqGenerator("org.postgresql:postgresql:$postgresVersion")
+
+    openApiGenerator("org.openapitools:openapi-generator-cli:$openApiGeneratorVersion")
 }
 
 // Generated jOOQ classes are committed, so a clean clone compiles with no
 // Docker and no database. Regenerate with ./scripts/jooq-generate.sh.
 sourceSets["main"].java.srcDir("src/generated/jooq")
+sourceSets["main"].java.srcDir("src/generated/api")
 
 /**
  * Runs jOOQ's GenerationTool directly instead of using the Gradle plugin.
@@ -128,6 +135,51 @@ tasks.register<JavaExec>("jooqCodegen") {
     }
 }
 
+tasks.register<JavaExec>("apiCodegen") {
+    group = "build"
+    description = "Generates DTOs from api/definitions.yaml"
+
+    classpath = openApiGenerator
+    mainClass.set("org.openapitools.codegen.OpenAPIGenerator")
+
+    val output = layout.projectDirectory.dir("src/generated/api")
+    val bundled = layout.buildDirectory.file("api-models.yaml")
+
+    doFirst {
+        delete(output)
+
+        // The generator inlines external $refs and then names the model after
+        // the operation, so api.yaml would give CapturePaymentRequestDto.
+        // Generating from the schema file keeps the declared names.
+        val spec = bundled.get().asFile
+        spec.parentFile.mkdirs()
+        spec.writeText(
+            buildString {
+                appendLine("openapi: 3.1.0")
+                appendLine("info:")
+                appendLine("  title: MoR Ledger API models")
+                appendLine("  version: 0.1.0")
+                appendLine("paths: {}")
+                append(file("api/definitions.yaml").readText())
+            }
+        )
+
+        args = listOf(
+            "generate",
+            "-i", spec.absolutePath,
+            "-g", "kotlin",
+            "-o", output.asFile.absolutePath,
+            "--model-name-suffix", "Dto",
+            "--package-name", "org.example.api.generated",
+            "--model-package", "org.example.api.generated.model",
+            "--global-property", "models,modelDocs=false,modelTests=false",
+            "--type-mappings", "UUID=kotlin.String,DateTime=kotlin.String,date-time=kotlin.String",
+            "--additional-properties",
+            "serializationLibrary=kotlinx_serialization,enumPropertyNaming=UPPERCASE,sourceFolder=,dateLibrary=string",
+        )
+    }
+}
+
 kotlin {
     jvmToolchain(21)
 }
@@ -138,4 +190,44 @@ application {
 
 tasks.test {
     useJUnitPlatform()
+
+    // A skipped database test must be visible. Without this the build prints
+    // BUILD SUCCESSFUL whether Postgres was exercised or quietly bypassed.
+    testLogging {
+        events("skipped", "failed")
+    }
+
+    // Testcontainers looks for DOCKER_HOST, then /var/run/docker.sock. Colima
+    // and Rancher Desktop put their socket under the user's home instead, so
+    // the lookup fails and every database test dies with "Could not find a
+    // valid Docker environment". Docker Desktop needs none of this - the list
+    // below finds nothing and the block is a no-op.
+    //
+    // The socket override tells Ryuk, which runs inside the VM, where the
+    // socket is from ITS point of view, which is always /var/run/docker.sock.
+    if (System.getenv("DOCKER_HOST") == null) {
+        val home = System.getProperty("user.home")
+        val socket = listOf(
+            "$home/.colima/default/docker.sock",
+            "$home/.colima/docker.sock",
+            "$home/.rd/docker.sock",
+            "$home/.docker/run/docker.sock",
+        ).firstOrNull { File(it).exists() }
+
+        if (socket != null) {
+            environment("DOCKER_HOST", "unix://$socket")
+            environment("TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE", "/var/run/docker.sock")
+
+            // Without this docker-java falls back to API 1.32 and Colima's
+            // daemon rejects anything below 1.40. 1.41 is Docker 20.10, old
+            // enough to be safe everywhere and new enough to be accepted.
+            if (System.getenv("DOCKER_API_VERSION") == null) {
+                environment("DOCKER_API_VERSION", "1.41")
+                environment("API_VERSION", "1.41")
+                systemProperty("api.version", "1.41")
+            }
+
+            logger.lifecycle("testcontainers docker socket: $socket")
+        }
+    }
 }

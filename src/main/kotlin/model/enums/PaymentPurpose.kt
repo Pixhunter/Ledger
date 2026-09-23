@@ -1,4 +1,4 @@
-package org.example.ledger
+package org.example.model.enums
 
 import org.example.model.EnumId
 

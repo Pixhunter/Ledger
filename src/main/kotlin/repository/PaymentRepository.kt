@@ -5,10 +5,10 @@ import org.example.db.io
 import org.example.jooq.tables.references.LEDGER_ENTRY
 import org.example.jooq.tables.references.LEDGER_TRANSACTION
 import org.example.jooq.tables.references.PAYMENT
-import org.example.ledger.PaymentWrite
-import org.example.ledger.LedgerEntry
-import org.example.ledger.LedgerTransactionType
-import org.example.repository.model.PaymentEntity
+import org.example.model.PaymentWrite
+import org.example.model.LedgerEntry
+import org.example.model.enums.LedgerTransactionType
+import org.example.model.PaymentEntity
 import org.example.model.enums.HoldReason
 import org.example.model.enumById
 import org.example.model.enums.PaymentStatus
@@ -18,11 +18,11 @@ import org.slf4j.LoggerFactory
 import java.time.ZoneOffset
 import java.util.UUID
 
-class PaymentRepository(private val dsl: DSLContext) {
+class PaymentRepository(private val dsl: DSLContext) : PaymentStore {
 
     private val log = LoggerFactory.getLogger(PaymentRepository::class.java)
 
-    suspend fun insert(
+    override suspend fun insert(
         payment: PaymentEntity,
         entries: List<LedgerEntry>,
     ): PaymentWrite = io {

@@ -1,6 +1,7 @@
-package org.example.ledger
+package org.example.model
 
 import org.example.model.enums.Currency
+import org.example.model.enums.PaymentPurpose
 
 data class LedgerEntry(
     val purpose: PaymentPurpose,

@@ -1,9 +1,9 @@
 package org.example.service
 
-import org.example.ledger.LedgerEntry
-import org.example.ledger.PaymentPurpose
+import org.example.model.LedgerEntry
+import org.example.model.enums.PaymentPurpose
 import org.example.model.enums.PaymentStatus
-import org.example.repository.model.PaymentEntity
+import org.example.model.PaymentEntity
 
 object PaymentEntries {
 

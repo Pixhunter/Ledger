@@ -1,7 +1,7 @@
 package org.example.api.controller
 
-import org.example.api.model.PaymentRequestDto
-import org.example.api.model.PaymentResponseDto
+import org.example.api.generated.model.PaymentRequestDto
+import org.example.api.generated.model.PaymentResponseDto
 import org.example.api.mapper.PaymentMapper.toModel
 import org.example.service.PaymentResult
 import org.example.service.PaymentService

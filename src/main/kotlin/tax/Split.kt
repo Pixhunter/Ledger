@@ -13,14 +13,12 @@ import org.example.model.enums.Currency
  */
 data class Split(
     val gross: Long,
-    val net: Long,
     val tax: Long,
     val fee: Long,
     val merchant: Long,
     val currency: Currency,
     val jurisdiction: String,
     val taxRate: BasisPoints,
-    val taxMode: TaxMode,
     val reverseCharge: Boolean,
 ) {
     init {

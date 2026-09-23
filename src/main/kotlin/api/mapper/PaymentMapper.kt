@@ -1,6 +1,6 @@
 package org.example.api.mapper
 
-import org.example.api.model.PaymentRequestDto
+import org.example.api.generated.model.PaymentRequestDto
 import org.example.model.PaymentModel
 import org.example.toCountry
 import org.example.toCurrency

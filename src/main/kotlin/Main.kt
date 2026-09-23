@@ -11,18 +11,18 @@ import io.ktor.server.response.respond
 import org.example.api.controller.LedgerController
 import org.example.api.controller.apiRoutes
 import org.example.api.controller.devRoutes
-import org.example.api.model.PaymentResponseDto
-import org.example.api.model.FailureReasonDto
+import org.example.api.generated.model.ErrorReasonDto
 import org.example.api.security.PspSignature
 import org.example.config.AppConfig
 import org.example.db.Database
 import org.example.db.Migrations
 import org.example.repository.PaymentRepository
-import org.example.service.InMemoryMerchantRegistry
+import org.example.service.MerchantRegistry
 import org.example.service.PaymentService
 import org.example.tax.BasisPoints
 import org.example.tax.TaxRates
 import org.slf4j.LoggerFactory
+import org.example.api.paymentRejected
 
 private val log = LoggerFactory.getLogger("Main")
 
@@ -44,7 +44,7 @@ fun main() {
     val payments = PaymentService(
         payments = paymentRepository,
         rates = TaxRates(),
-        merchants = InMemoryMerchantRegistry(),
+        merchants = MerchantRegistry(),
         feeRate = BasisPoints(config.mor.feeBasisPoints),
         morCountry = config.mor.country,
     )
@@ -61,7 +61,7 @@ fun main() {
                 log.warn("bad request: {}", cause.message)
                 call.respond(
                     HttpStatusCode.BadRequest,
-                    PaymentResponseDto.failed(FailureReasonDto.INVALID_REQUEST),
+                    paymentRejected(ErrorReasonDto.INVALID_REQUEST),
                 )
             }
         }

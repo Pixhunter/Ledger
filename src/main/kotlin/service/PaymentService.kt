@@ -1,18 +1,17 @@
 package org.example.service
 
-import org.example.api.model.FailureReasonDto
-import org.example.ledger.PaymentWrite
-import org.example.repository.model.PaymentEntity
+import org.example.api.generated.model.ErrorReasonDto
+import org.example.model.PaymentWrite
+import org.example.model.PaymentEntity
 import org.example.model.enums.HoldReason
 import org.example.model.PaymentModel
 import org.example.model.enums.PaymentStatus
 import org.example.model.enums.TaxCategory
-import org.example.repository.PaymentRepository
+import org.example.repository.PaymentStore
 import org.example.tax.BasisPoints
 import org.example.tax.Split
 import org.example.tax.TaxCalculator
 import org.example.tax.TaxCountryVote
-import org.example.tax.TaxMode
 import org.example.tax.TaxRates
 import org.slf4j.LoggerFactory
 import java.util.UUID
@@ -36,7 +35,7 @@ import java.util.UUID
  *   6. one write
  */
 class PaymentService(
-    private val payments: PaymentRepository,
+    private val payments: PaymentStore,
     private val rates: TaxRates,
     private val merchants: MerchantRegistry,
     private val feeRate: BasisPoints,
@@ -65,9 +64,11 @@ class PaymentService(
 
         // 3. A country with no rate is the same situation as no country: we
         //    must not guess, because a guessed rate becomes a wrong tax return.
+        val reverseCharge = taxCountry != null && request.isBusiness && taxCountry != morCountry
+
         val rate = when {
             taxCountry == null -> null
-            request.isBusiness && taxCountry != morCountry -> BasisPoints.ZERO  // reverse charge
+            reverseCharge -> BasisPoints.ZERO
             else -> rates.lookup(taxCountry)
         }
 
@@ -76,23 +77,20 @@ class PaymentService(
             return hold(request, evidence, HoldReason.TAX_UNRESOLVED, taxCountry)
         }
 
-        val reverseCharge = request.isBusiness && taxCountry != morCountry
-
         // 4. Does the money actually split? A capture below our own fee is a
         //    broken request, not money to hold.
         val split = runCatching {
             TaxCalculator.split(
-                amount = request.amount,
+                gross = request.amount,
                 currency = request.currency,
                 jurisdiction = taxCountry,
                 taxRate = rate,
-                taxMode = TaxMode.INCLUSIVE,      // PSP sends what the customer paid
                 feeRate = feeRate,
                 reverseCharge = reverseCharge,
             )
         }.getOrElse { e ->
             log.warn("split failed for {}: {}", request.pspReference, e.message)
-            return PaymentResult.Rejected(FailureReasonDto.AMOUNT_BELOW_FEE)
+            return PaymentResult.Rejected(ErrorReasonDto.AMOUNT_BELOW_FEE)
         }
 
         // 5. Unknown merchant: correct split, nobody to owe it to yet.
@@ -104,7 +102,7 @@ class PaymentService(
         val payment = PaymentEntity(
             id = UUID.randomUUID(),
             pspReference = request.pspReference,
-            merchantId = if (known) request.merchantId else null,
+            merchantId = request.merchantId,
             gross = split.gross,
             tax = split.tax,
             fee = split.fee,

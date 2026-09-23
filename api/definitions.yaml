@@ -2,7 +2,6 @@ components:
   schemas:
     PaymentRequest:
       type: object
-      additionalProperties: false
       required:
         - pspReference
         - merchantId
@@ -80,7 +79,6 @@ components:
     BillingAddress:
       description: Customer billing address as collected by PSP. Tax evidence, wins on conflict.
       type: object
-      additionalProperties: false
       required: [ country ]
       properties:
         country:
