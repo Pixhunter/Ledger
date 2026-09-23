@@ -44,7 +44,7 @@ paths:
                 postalCode: '10115'
               cardIssuingCountry: DE
               ipCountry: DE
-              capturedAt: 2026-09-23T10:15:30Z
+              paymentTime: 2026-09-23T10:15:30Z
       responses:
         '200':
           description: Recorded
@@ -62,4 +62,4 @@ paths:
                 $ref: './definitions.yaml#/components/schemas/PaymentResponse'
               example:
                 status: FAILED
-                reason: UNSUPPORTED_TAX_COUNTRY
+                reason: AMOUNT_BELOW_FEE

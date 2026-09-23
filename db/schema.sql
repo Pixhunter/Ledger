@@ -5,7 +5,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict abMlnb7GBkvL6hw8SSewQBD2nGadBFBYp9eMfdTfLmzSoyQcfk3Kdd3hMtB1Wyx
+\restrict Vd3dqwVRcdVjlBPQpzZaWwwGJOj84dVYublyCJSYwbZSWpum1MYz0y6wQfX1qby
 
 -- Dumped from database version 17.11
 -- Dumped by pg_dump version 17.11
@@ -40,13 +40,13 @@ SET default_table_access_method = heap;
 CREATE TABLE mor.ledger_entry (
     id bigint NOT NULL,
     transaction_id uuid NOT NULL,
-    account_type text NOT NULL,
-    account_key text,
+    purpose smallint NOT NULL,
+    purpose_key text,
     amount bigint NOT NULL,
     currency text NOT NULL,
-    CONSTRAINT ledger_entry_account_ck CHECK ((account_type = ANY (ARRAY['PSP'::text, 'TAX'::text, 'REVENUE'::text, 'MERCHANT'::text, 'HELD'::text]))),
     CONSTRAINT ledger_entry_amount_ck CHECK ((amount <> 0)),
-    CONSTRAINT ledger_entry_currency_ck CHECK ((currency ~ '^[A-Z]{3}$'::text))
+    CONSTRAINT ledger_entry_currency_ck CHECK ((currency ~ '^[A-Z]{3}$'::text)),
+    CONSTRAINT ledger_entry_purpose_ck CHECK ((purpose = ANY (ARRAY[1, 2, 3, 4, 5])))
 );
 
 
@@ -70,10 +70,10 @@ ALTER TABLE mor.ledger_entry ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
 
 CREATE TABLE mor.ledger_transaction (
     id uuid NOT NULL,
-    type text NOT NULL,
+    type smallint NOT NULL,
     payment_id uuid,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT ledger_transaction_type_ck CHECK ((type = ANY (ARRAY['CAPTURE'::text, 'REFUND'::text, 'RELEASE'::text, 'PAYOUT'::text])))
+    CONSTRAINT ledger_transaction_type_ck CHECK ((type = ANY (ARRAY[1, 2, 3, 4])))
 );
 
 
@@ -86,13 +86,13 @@ CREATE TABLE mor.merchant (
     name text NOT NULL,
     currency text NOT NULL,
     fee_rate_bps integer NOT NULL,
-    tax_category text NOT NULL,
-    status text NOT NULL,
+    tax_category smallint NOT NULL,
+    status smallint NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT merchant_currency_ck CHECK ((currency ~ '^[A-Z]{3}$'::text)),
     CONSTRAINT merchant_fee_rate_ck CHECK (((fee_rate_bps >= 0) AND (fee_rate_bps <= 10000))),
-    CONSTRAINT merchant_status_ck CHECK ((status = ANY (ARRAY['ACTIVE'::text, 'SUSPENDED'::text]))),
-    CONSTRAINT merchant_tax_category_ck CHECK ((tax_category = ANY (ARRAY['STANDARD'::text, 'REDUCED'::text])))
+    CONSTRAINT merchant_status_ck CHECK ((status = ANY (ARRAY[1, 2]))),
+    CONSTRAINT merchant_tax_category_ck CHECK ((tax_category = ANY (ARRAY[1, 2])))
 );
 
 
@@ -129,20 +129,20 @@ CREATE TABLE mor.payment (
     merchant_net bigint NOT NULL,
     currency text NOT NULL,
     tax_country text,
-    tax_category text,
+    tax_category smallint,
     tax_rate_bps integer,
     reverse_charge boolean DEFAULT false NOT NULL,
     evidence jsonb NOT NULL,
-    status text NOT NULL,
-    hold_reason text,
+    status smallint NOT NULL,
+    hold_reason smallint,
     captured_at timestamp with time zone NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT payment_amounts_ck CHECK (((gross > 0) AND (tax >= 0) AND (fee >= 0) AND (merchant_net >= 0))),
     CONSTRAINT payment_country_ck CHECK (((tax_country IS NULL) OR (tax_country ~ '^[A-Z]{2}$'::text))),
     CONSTRAINT payment_currency_ck CHECK ((currency ~ '^[A-Z]{3}$'::text)),
-    CONSTRAINT payment_hold_ck CHECK (((status = 'HELD'::text) = (hold_reason IS NOT NULL))),
+    CONSTRAINT payment_hold_ck CHECK (((status = 2) = (hold_reason IS NOT NULL))),
     CONSTRAINT payment_split_ck CHECK ((gross = ((tax + fee) + merchant_net))),
-    CONSTRAINT payment_status_ck CHECK ((status = ANY (ARRAY['POSTED'::text, 'HELD'::text, 'FAILED'::text])))
+    CONSTRAINT payment_status_ck CHECK ((status = ANY (ARRAY[1, 2, 3])))
 );
 
 
@@ -156,11 +156,11 @@ CREATE TABLE mor.payout (
     amount bigint NOT NULL,
     currency text NOT NULL,
     ledger_transaction_id uuid NOT NULL,
-    status text NOT NULL,
+    status smallint NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT payout_amount_ck CHECK ((amount > 0)),
     CONSTRAINT payout_currency_ck CHECK ((currency ~ '^[A-Z]{3}$'::text)),
-    CONSTRAINT payout_status_ck CHECK ((status = ANY (ARRAY['COMPUTED'::text, 'SENT'::text, 'CONFIRMED'::text])))
+    CONSTRAINT payout_status_ck CHECK ((status = ANY (ARRAY[1, 2, 3])))
 );
 
 
@@ -170,11 +170,11 @@ CREATE TABLE mor.payout (
 
 CREATE TABLE mor.tax_rate (
     country text NOT NULL,
-    category text NOT NULL,
+    category smallint NOT NULL,
     valid_from date NOT NULL,
     rate_bps integer NOT NULL,
     CONSTRAINT tax_rate_bps_ck CHECK (((rate_bps >= 0) AND (rate_bps <= 10000))),
-    CONSTRAINT tax_rate_category_ck CHECK ((category = ANY (ARRAY['STANDARD'::text, 'REDUCED'::text]))),
+    CONSTRAINT tax_rate_category_ck CHECK ((category = ANY (ARRAY[1, 2]))),
     CONSTRAINT tax_rate_country_ck CHECK ((country ~ '^[A-Z]{2}$'::text))
 );
 
@@ -236,10 +236,10 @@ ALTER TABLE ONLY mor.tax_rate
 
 
 --
--- Name: ledger_entry_account_idx; Type: INDEX; Schema: mor; Owner: -
+-- Name: ledger_entry_purpose_idx; Type: INDEX; Schema: mor; Owner: -
 --
 
-CREATE INDEX ledger_entry_account_idx ON mor.ledger_entry USING btree (account_type, account_key, currency);
+CREATE INDEX ledger_entry_purpose_idx ON mor.ledger_entry USING btree (purpose, purpose_key, currency);
 
 
 --
@@ -260,7 +260,7 @@ CREATE INDEX ledger_transaction_payment_idx ON mor.ledger_transaction USING btre
 -- Name: payment_held_idx; Type: INDEX; Schema: mor; Owner: -
 --
 
-CREATE INDEX payment_held_idx ON mor.payment USING btree (status) WHERE (status = 'HELD'::text);
+CREATE INDEX payment_held_idx ON mor.payment USING btree (status) WHERE (status = 2);
 
 
 --
@@ -328,5 +328,5 @@ ALTER TABLE ONLY mor.payout
 -- PostgreSQL database dump complete
 --
 
-\unrestrict abMlnb7GBkvL6hw8SSewQBD2nGadBFBYp9eMfdTfLmzSoyQcfk3Kdd3hMtB1Wyx
+\unrestrict Vd3dqwVRcdVjlBPQpzZaWwwGJOj84dVYublyCJSYwbZSWpum1MYz0y6wQfX1qby
 

@@ -8,8 +8,8 @@ data class PaymentResponseDto(
     val reason: String? = null,
 ) {
     companion object {
-        fun success() = PaymentResponseDto(ResponseStatus.SUCCESS.name)
+        fun success() = PaymentResponseDto(ResponseStatusDto.SUCCESS.name)
 
-        fun failed(reason: FailureReason) = PaymentResponseDto(ResponseStatus.FAILED.name, reason.name)
+        fun failed(reason: FailureReasonDto) = PaymentResponseDto(ResponseStatusDto.FAILED.name, reason.name)
     }
 }

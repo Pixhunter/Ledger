@@ -4,11 +4,6 @@ import org.example.model.enums.Currency
 import java.time.Instant
 import java.util.UUID
 
-/**
- * Wire-value parsing shared by the mappers. Each throws
- * IllegalArgumentException, which StatusPages turns into 400 INVALID_REQUEST.
- */
-
 fun String.toUuid(field: String): UUID =
     runCatching { UUID.fromString(this) }
         .getOrElse { throw IllegalArgumentException("$field is not a valid uuid: '$this'") }

@@ -146,17 +146,17 @@ CREATE TABLE mor.ledger_entry
 (
     id             bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     transaction_id uuid   NOT NULL REFERENCES mor.ledger_transaction (id),
-    account_type   smallint NOT NULL,                -- AccountType: 1 PSP, 2 TAX, 3 REVENUE, 4 MERCHANT, 5 HELD
-    account_key    text   NULL,                      -- TAX: country, MERCHANT/HELD: merchant id
+    purpose        smallint NOT NULL,                -- PaymentPurpose: 1 PSP, 2 TAX, 3 REVENUE, 4 MERCHANT, 5 HELD
+    purpose_key    text   NULL,                      -- TAX: country, MERCHANT/HELD: merchant id
     amount         bigint NOT NULL,                  -- signed: + debit, - credit
     currency       text   NOT NULL,
 
     CONSTRAINT ledger_entry_amount_ck   CHECK (amount <> 0),
-    CONSTRAINT ledger_entry_account_ck  CHECK (account_type IN (1, 2, 3, 4, 5)),
+    CONSTRAINT ledger_entry_purpose_ck  CHECK (purpose IN (1, 2, 3, 4, 5)),
     CONSTRAINT ledger_entry_currency_ck CHECK (currency ~ '^[A-Z]{3}$')
 );
 
-CREATE INDEX ledger_entry_account_idx ON mor.ledger_entry (account_type, account_key, currency);
+CREATE INDEX ledger_entry_purpose_idx ON mor.ledger_entry (purpose, purpose_key, currency);
 CREATE INDEX ledger_entry_transaction_idx ON mor.ledger_entry (transaction_id);
 
 

@@ -48,21 +48,20 @@ components:
           $ref: '#/components/schemas/ErrorReason'
 
     Status:
-      description: State machine result
+      description: Whether the payment was recorded. HELD payments are recorded, so they are SUCCESS.
       type: string
       enum: [ SUCCESS, FAILED ]
       examples: [ SUCCESS ]
 
     ErrorReason:
-      description: State machine result
+      description: |
+        Why nothing was recorded. Short by design: after capture the money is
+        already taken, so anything we cannot attribute is stored as HELD and
+        answered with SUCCESS. Only a broken request fails.
       type: string
       enum:
         - INVALID_REQUEST
-        - UNKNOWN_MERCHANT
-        - DUPLICATE_CONFLICT
         - AMOUNT_BELOW_FEE
-        - UNSUPPORTED_TAX_COUNTRY
-        - INSUFFICIENT_TAX_EVIDENCE
       examples: [ INVALID_REQUEST ]
 
     Currency:

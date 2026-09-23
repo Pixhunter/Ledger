@@ -1,13 +1,13 @@
 package org.example.service
 
-import org.example.api.model.FailureReason
+import org.example.api.model.FailureReasonDto
 import org.example.ledger.PaymentWrite
-import org.example.ledger.PaymentRepository
 import org.example.repository.model.PaymentEntity
 import org.example.model.enums.HoldReason
 import org.example.model.PaymentModel
 import org.example.model.enums.PaymentStatus
 import org.example.model.enums.TaxCategory
+import org.example.repository.PaymentRepository
 import org.example.tax.BasisPoints
 import org.example.tax.Split
 import org.example.tax.TaxCalculator
@@ -92,7 +92,7 @@ class PaymentService(
             )
         }.getOrElse { e ->
             log.warn("split failed for {}: {}", request.pspReference, e.message)
-            return PaymentResult.Rejected(FailureReason.AMOUNT_BELOW_FEE)
+            return PaymentResult.Rejected(FailureReasonDto.AMOUNT_BELOW_FEE)
         }
 
         // 5. Unknown merchant: correct split, nobody to owe it to yet.
@@ -117,7 +117,7 @@ class PaymentService(
             evidence = evidence,
             status = if (known) PaymentStatus.POSTED else PaymentStatus.HELD,
             holdReason = if (known) null else HoldReason.UNKNOWN_MERCHANT,
-            capturedAt = request.capturedAt,
+            paymentTime = request.paymentTime,
         )
 
         return write(payment, split)
@@ -146,14 +146,14 @@ class PaymentService(
             evidence = evidence,
             status = PaymentStatus.HELD,
             holdReason = reason,
-            capturedAt = request.capturedAt,
+            paymentTime = request.paymentTime,
         )
 
         return write(payment, split = null)
     }
 
     private suspend fun write(payment: PaymentEntity, split: Split?): PaymentResult =
-        when (val outcome = payments.insert(payment, PaymentEntries.of(payment))) {
+        when (payments.insert(payment, PaymentEntries.of(payment))) {
             is PaymentWrite.Duplicate -> PaymentResult.Duplicate
             PaymentWrite.Inserted -> when (payment.status) {
                 PaymentStatus.HELD -> PaymentResult.Held(split)

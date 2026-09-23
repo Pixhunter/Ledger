@@ -8,7 +8,6 @@ import org.example.jooq.tables.references.PAYMENT
 import org.example.ledger.PaymentWrite
 import org.example.ledger.LedgerEntry
 import org.example.ledger.LedgerTransactionType
-import org.example.ledger.PaymentRepository
 import org.example.repository.model.PaymentEntity
 import org.example.model.enums.HoldReason
 import org.example.model.enumById
@@ -19,11 +18,11 @@ import org.slf4j.LoggerFactory
 import java.time.ZoneOffset
 import java.util.UUID
 
-class JooqPaymentRepository(private val dsl: DSLContext) : PaymentRepository {
+class PaymentRepository(private val dsl: DSLContext) {
 
-    private val log = LoggerFactory.getLogger(JooqPaymentRepository::class.java)
+    private val log = LoggerFactory.getLogger(PaymentRepository::class.java)
 
-    override suspend fun insert(
+    suspend fun insert(
         payment: PaymentEntity,
         entries: List<LedgerEntry>,
     ): PaymentWrite = io {
@@ -59,7 +58,7 @@ class JooqPaymentRepository(private val dsl: DSLContext) : PaymentRepository {
                 .set(PAYMENT.EVIDENCE, Mapper.toJsonb(payment.evidence))
                 .set(PAYMENT.STATUS, payment.status.id)
                 .set(PAYMENT.HOLD_REASON, payment.holdReason?.id)
-                .set(PAYMENT.CAPTURED_AT, payment.capturedAt.atOffset(ZoneOffset.UTC))
+                .set(PAYMENT.CAPTURED_AT, payment.paymentTime.atOffset(ZoneOffset.UTC))
                 .onConflict(PAYMENT.PSP_REFERENCE)
                 .doNothing()
                 .returningResult(PAYMENT.ID)
@@ -102,8 +101,8 @@ class JooqPaymentRepository(private val dsl: DSLContext) : PaymentRepository {
             val insert = db.insertInto(
                 LEDGER_ENTRY,
                 LEDGER_ENTRY.TRANSACTION_ID,
-                LEDGER_ENTRY.ACCOUNT_TYPE,
-                LEDGER_ENTRY.ACCOUNT_KEY,
+                LEDGER_ENTRY.PURPOSE,
+                LEDGER_ENTRY.PURPOSE_KEY,
                 LEDGER_ENTRY.AMOUNT,
                 LEDGER_ENTRY.CURRENCY,
             )
@@ -111,8 +110,8 @@ class JooqPaymentRepository(private val dsl: DSLContext) : PaymentRepository {
             entries.forEach { e ->
                 insert.values(
                     transactionId,
-                    e.accountType.id,
-                    e.accountKey,
+                    e.purpose.id,
+                    e.purposeKey,
                     e.amount,
                     e.currency.name,
                 )

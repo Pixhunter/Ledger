@@ -32,7 +32,7 @@ data class PaymentEntity(
     val status: PaymentStatus,
     val holdReason: HoldReason?,
     /** From the PSP. This is the tax point, and it decides the filing period. */
-    val capturedAt: Instant,
+    val paymentTime: Instant,
 ) {
     init {
         require(gross == tax + fee + merchantNet) {

@@ -12,5 +12,5 @@ data class PaymentRequestDto(
     val cardIssuingCountry: String,
     val ipCountry: String? = null,
     val customerVatId: String? = null,
-    val capturedAt: String,
+    val paymentTime: String,
 )

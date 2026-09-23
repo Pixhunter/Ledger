@@ -33,7 +33,7 @@ object PaymentMapper {
             cardIssuingCountry = cardIssuingCountry.toCountry("cardIssuingCountry"),
             ipCountry = ipCountry?.toCountry("ipCountry"),
             customerVatId = customerVatId,
-            capturedAt = capturedAt.toInstant("capturedAt"),
+            paymentTime = paymentTime.toInstant("paymentTime"),
         )
     }
 }

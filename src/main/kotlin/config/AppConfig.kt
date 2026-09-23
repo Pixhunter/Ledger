@@ -15,11 +15,8 @@ data class AppConfig(
     val psp: PspConfig = PspConfig(),
 ) {
     companion object {
-
         private const val DEFAULT_PATH = "config/application.yaml"
 
-        // jacksonObjectMapper() takes a configuration lambda, not a factory -
-        // passing YAMLFactory() there compiles but blows up at runtime.
         private val yaml: ObjectMapper = ObjectMapper(YAMLFactory()).registerKotlinModule()
 
         /**

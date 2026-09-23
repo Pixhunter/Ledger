@@ -14,7 +14,7 @@ data class PaymentModel(
     val cardIssuingCountry: String,
     val ipCountry: String?,
     val customerVatId: String?,
-    val capturedAt: Instant,
+    val paymentTime: Instant,
 ) {
     /** Presence of a VAT id means a business buyer: candidate for reverse charge. */
     val isBusiness: Boolean get() = !customerVatId.isNullOrBlank()

@@ -1,6 +1,6 @@
 package org.example.service
 
-import org.example.api.model.FailureReason
+import org.example.api.model.FailureReasonDto
 import org.example.api.model.PaymentResponseDto
 import org.example.tax.Split
 
@@ -20,7 +20,7 @@ sealed interface PaymentResult {
     data object Duplicate : PaymentResult
 
     /** Nothing written - the request itself was broken. */
-    data class Rejected(val reason: FailureReason) : PaymentResult
+    data class Rejected(val reason: FailureReasonDto) : PaymentResult
 
     fun toResponse(): PaymentResponseDto = when (this) {
         is Rejected -> PaymentResponseDto.failed(reason)

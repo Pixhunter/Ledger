@@ -12,12 +12,12 @@ import org.example.api.controller.LedgerController
 import org.example.api.controller.apiRoutes
 import org.example.api.controller.devRoutes
 import org.example.api.model.PaymentResponseDto
-import org.example.api.model.FailureReason
+import org.example.api.model.FailureReasonDto
 import org.example.api.security.PspSignature
 import org.example.config.AppConfig
 import org.example.db.Database
 import org.example.db.Migrations
-import org.example.repository.JooqPaymentRepository
+import org.example.repository.PaymentRepository
 import org.example.service.InMemoryMerchantRegistry
 import org.example.service.PaymentService
 import org.example.tax.BasisPoints
@@ -35,7 +35,7 @@ fun main() {
 
     val dsl = Database.dslContext(dataSource)
 
-    val paymentRepository = JooqPaymentRepository(dsl)
+    val paymentRepository = PaymentRepository(dsl)
     val signature = PspSignature(config.psp.secret)
     if (!signature.enabled) {
         log.warn("PSP signature verification is OFF - set psp.secret before anything real")
@@ -61,7 +61,7 @@ fun main() {
                 log.warn("bad request: {}", cause.message)
                 call.respond(
                     HttpStatusCode.BadRequest,
-                    PaymentResponseDto.failed(FailureReason.INVALID_REQUEST),
+                    PaymentResponseDto.failed(FailureReasonDto.INVALID_REQUEST),
                 )
             }
         }
