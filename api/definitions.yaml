@@ -60,7 +60,6 @@ components:
       type: string
       enum:
         - INVALID_REQUEST
-        - AMOUNT_BELOW_FEE
       examples: [ INVALID_REQUEST ]
 
     Currency:

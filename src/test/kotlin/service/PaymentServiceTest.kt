@@ -1,11 +1,11 @@
 package org.example.service
 
 import kotlinx.coroutines.runBlocking
-import org.example.api.generated.model.ErrorReasonDto
 import org.example.model.LedgerEntry
 import org.example.model.PaymentEntity
 import org.example.model.PaymentModel
 import org.example.model.PaymentWrite
+import org.example.model.RejectReason
 import org.example.model.enums.Currency
 import org.example.model.enums.HoldReason
 import org.example.model.enums.PaymentPurpose
@@ -30,7 +30,7 @@ class PaymentServiceTest {
 
         val result = run(store, request())
 
-        assertTrue(result is PaymentResult.Posted)
+        assertEquals(PaymentResult.Posted, result)
         val payment = store.single()
         assertEquals(PaymentStatus.POSTED, payment.status)
         assertNull(payment.holdReason)
@@ -60,7 +60,7 @@ class PaymentServiceTest {
 
         val result = run(store, request(country = "JP"))
 
-        assertTrue(result is PaymentResult.Held)
+        assertEquals(PaymentResult.Held, result)
         val payment = store.single()
         assertEquals(PaymentStatus.HELD, payment.status)
         assertEquals(HoldReason.TAX_UNRESOLVED, payment.holdReason)
@@ -75,7 +75,7 @@ class PaymentServiceTest {
 
         val result = run(store, request(), known = setOf(UUID.randomUUID()))
 
-        assertTrue(result is PaymentResult.Held)
+        assertEquals(PaymentResult.Held, result)
         val payment = store.single()
         assertEquals(PaymentStatus.HELD, payment.status)
         assertEquals(HoldReason.UNKNOWN_MERCHANT, payment.holdReason)
@@ -106,12 +106,12 @@ class PaymentServiceTest {
     }
 
     @Test
-    fun `rejects an amount the fee cannot come out of`() {
+    fun `rejects a non positive amount`() {
         val store = RecordingStore()
 
         val result = run(store, request(amount = 0))
 
-        assertEquals(PaymentResult.Rejected(ErrorReasonDto.AMOUNT_BELOW_FEE), result)
+        assertEquals(PaymentResult.Rejected(RejectReason.INVALID_REQUEST), result)
         assertTrue(store.writes.isEmpty())
     }
 

@@ -49,13 +49,14 @@ fun main() {
         morCountry = config.mor.country,
     )
 
-    val controller = LedgerController(payments)
+    val controller = LedgerController(payments, signature)
 
     embeddedServer(Netty, host = config.server.host, port = config.server.port) {
         install(ContentNegotiation) { json() }
 
-        // Validation lives in PaymentModel.from(); this turns its complaint
-        // into 400 INVALID_REQUEST instead of a 500 with a stack trace.
+        // Safety net only. The controller already answers every expected
+        // failure; this catches a require() added somewhere that does not,
+        // so it is a 400 rather than a 500 with a stack trace.
         install(StatusPages) {
             exception<IllegalArgumentException> { call, cause ->
                 log.warn("bad request: {}", cause.message)
@@ -66,7 +67,7 @@ fun main() {
             }
         }
 
-        apiRoutes(controller, signature)
+        apiRoutes(controller)
 
         // Operational only. Bind elsewhere or drop entirely in production -
         // nothing here should be reachable from where the PSP calls in.

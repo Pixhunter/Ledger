@@ -58,7 +58,7 @@ class PaymentRepository(private val dsl: DSLContext) : PaymentStore {
                 .set(PAYMENT.EVIDENCE, Mapper.toJsonb(payment.evidence))
                 .set(PAYMENT.STATUS, payment.status.id)
                 .set(PAYMENT.HOLD_REASON, payment.holdReason?.id)
-                .set(PAYMENT.CAPTURED_AT, payment.paymentTime.atOffset(ZoneOffset.UTC))
+                .set(PAYMENT.PAYMENT_TIME, payment.paymentTime.atOffset(ZoneOffset.UTC))
                 .onConflict(PAYMENT.PSP_REFERENCE)
                 .doNothing()
                 .returningResult(PAYMENT.ID)

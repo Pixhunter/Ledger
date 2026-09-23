@@ -1,11 +1,10 @@
 package org.example.tax
 
-import org.example.model.enums.Currency
+import kotlin.math.abs
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
-import kotlin.math.abs
 
 class TaxCalculatorTest {
 
@@ -17,55 +16,49 @@ class TaxCalculatorTest {
 
     @Test
     fun `extracts tax already contained in the charged amount`() {
-        val split = split(gross = 12_100, taxRate = spain)
+        val tax = TaxCalculator.tax(12_100, spain)
 
-        assertEquals(12_100, split.gross)
-        assertEquals(2_100, split.tax)
-        assertEquals(300, split.fee)
-        assertEquals(9_700, split.merchant)
+        assertEquals(2_100, tax)
+        assertEquals(300, TaxCalculator.fee(12_100 - tax, feeRate))
     }
 
     @Test
     fun `fee is charged on the net price, not on the tax`() {
-        val split = split(gross = 12_100, taxRate = spain)
+        val tax = TaxCalculator.tax(12_100, spain)
 
-        assertEquals(300, split.fee)
+        assertEquals(300, TaxCalculator.fee(12_100 - tax, feeRate))
+        assertEquals(363, TaxCalculator.fee(12_100, feeRate))
     }
 
     @Test
-    fun `rounds each component and lets the merchant absorb the remainder`() {
-        val split = split(gross = 10_000, taxRate = germany)
+    fun `rounds each component and leaves the remainder to the merchant`() {
+        val tax = TaxCalculator.tax(10_000, germany)
+        val fee = TaxCalculator.fee(10_000 - tax, feeRate)
 
-        assertEquals(1_597, split.tax)
-        assertEquals(252, split.fee)
-        assertEquals(8_151, split.merchant)
+        assertEquals(1_597, tax)
+        assertEquals(252, fee)
+        assertEquals(8_151, 10_000 - tax - fee)
     }
 
     @Test
     fun `reverse charge takes no tax at the applicable rate`() {
-        val split = split(gross = 10_000, taxRate = spain, reverseCharge = true)
-
-        assertEquals(0, split.tax)
-        assertEquals(300, split.fee)
-        assertEquals(9_700, split.merchant)
+        assertEquals(0, TaxCalculator.tax(10_000, spain, reverseCharge = true))
     }
 
     @Test
-    fun `zero rate leaves the whole amount to split between fee and merchant`() {
-        val split = split(gross = 10_000, taxRate = BasisPoints.ZERO)
-
-        assertEquals(0, split.tax)
-        assertEquals(300, split.fee)
-        assertEquals(9_700, split.merchant)
+    fun `zero rate takes no tax`() {
+        assertEquals(0, TaxCalculator.tax(10_000, BasisPoints.ZERO))
     }
 
     @Test
-    fun `split reconciles for every amount at every rate`() {
+    fun `tax and fee never exceed the amount`() {
         for (bps in RATES) {
             for (gross in 1L..5_000L) {
-                val split = split(gross = gross, taxRate = BasisPoints(bps))
-                assertEquals(gross, split.tax + split.fee + split.merchant)
-                assertTrue(split.tax >= 0 && split.fee >= 0 && split.merchant >= 0)
+                val tax = TaxCalculator.tax(gross, BasisPoints(bps))
+                val fee = TaxCalculator.fee(gross - tax, feeRate)
+
+                assertTrue(tax >= 0 && fee >= 0, "gross=$gross bps=$bps")
+                assertTrue(tax + fee <= gross, "gross=$gross bps=$bps tax=$tax fee=$fee")
             }
         }
     }
@@ -74,8 +67,9 @@ class TaxCalculatorTest {
     fun `tax on a single payment stays within half a minor unit of the exact value`() {
         for (bps in RATES) {
             for (gross in 1L..5_000L) {
-                val tax = split(gross = gross, taxRate = BasisPoints(bps)).tax
+                val tax = TaxCalculator.tax(gross, BasisPoints(bps))
                 val error = 2 * (tax * (10_000 + bps) - gross * bps)
+
                 assertTrue(abs(error) <= 10_000 + bps, "gross=$gross bps=$bps tax=$tax")
             }
         }
@@ -87,9 +81,10 @@ class TaxCalculatorTest {
             var totalTax = 0L
             var totalGross = 0L
             for (gross in 1L..10_000L) {
-                totalTax += split(gross = gross, taxRate = BasisPoints(bps)).tax
+                totalTax += TaxCalculator.tax(gross, BasisPoints(bps))
                 totalGross += gross
             }
+
             val drift = totalTax * (10_000 + bps) - totalGross * bps
             assertTrue(abs(drift) <= 10_000 + bps, "bps=$bps drifted ${drift / (10_000 + bps)} units")
         }
@@ -97,20 +92,7 @@ class TaxCalculatorTest {
 
     @Test
     fun `rejects a non positive amount`() {
-        assertFailsWith<IllegalArgumentException> { split(gross = 0, taxRate = spain) }
-        assertFailsWith<IllegalArgumentException> { split(gross = -1, taxRate = spain) }
+        assertFailsWith<IllegalArgumentException> { TaxCalculator.tax(0, spain) }
+        assertFailsWith<IllegalArgumentException> { TaxCalculator.tax(-1, spain) }
     }
-
-    private fun split(
-        gross: Long,
-        taxRate: BasisPoints,
-        reverseCharge: Boolean = false,
-    ) = TaxCalculator.split(
-        gross = gross,
-        currency = Currency.EUR,
-        jurisdiction = "ES",
-        taxRate = taxRate,
-        feeRate = feeRate,
-        reverseCharge = reverseCharge,
-    )
 }

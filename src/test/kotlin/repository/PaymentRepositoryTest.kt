@@ -85,7 +85,7 @@ class PaymentRepositoryTest {
         assertEquals(false, row.reverseCharge)
         assertEquals(PaymentStatus.POSTED, enumById<PaymentStatus>(row.status))
         assertNull(row.holdReason)
-        assertEquals(paymentTime, row.capturedAt.toInstant())
+        assertEquals(paymentTime, row.paymentTime.toInstant())
 
         val transaction = dsl.selectFrom(LEDGER_TRANSACTION).fetchSingle()
         assertEquals(payment.id, transaction.paymentId)

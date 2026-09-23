@@ -61,7 +61,7 @@ from config, so "Try it out" posts to the running app instead of the IDE's own
 web server on :63342.
 
 ```bash
-curl -X POST localhost:8081/v1/payment/capture \
+curl -X POST localhost:8081/v1/payments \
   -H 'Content-Type: application/json' \
   -d '{
     "pspReference": "psp-1",

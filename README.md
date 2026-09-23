@@ -269,7 +269,7 @@ erDiagram
     jsonb evidence "country codes only"
     smallint status "1 POSTED, 2 HELD, 3 FAILED"
     smallint hold_reason "1 UNKNOWN_MERCHANT, 2 TAX_UNRESOLVED"
-    timestamptz captured_at
+    timestamptz payment_time
     timestamptz created_at
   }
   LEDGER_TRANSACTION {
@@ -388,7 +388,7 @@ Lookup for a payment:
 ```
 country  = result of the country vote
 category = merchant.tax_category
-rate     = row with latest valid_from <= payment.captured_at
+rate     = row with latest valid_from <= payment.payment_time
 ```
 
 Rules:
@@ -407,7 +407,7 @@ Known limitations:
   must be registered as two merchants. Production: checkout sends the
   category per payment in PSP metadata.
 - Rate changes at midnight in the country's own time zone; we compare by
-  date of `captured_at` in UTC. Edge case, documented.
+  date of `payment_time` in UTC. Edge case, documented.
 
 ### Payment
 
@@ -431,7 +431,7 @@ payment
   evidence        jsonb         {"billing":"ES","card":"AU","ip":"ES","vatId":null}
   status          smallint      1 POSTED, 2 HELD, 3 FAILED, only mutable column
   hold_reason     smallint null  1 UNKNOWN_MERCHANT, 2 TAX_UNRESOLVED
-  captured_at     timestamptz   from PSP
+  payment_time     timestamptz   from PSP
   created_at      timestamptz   when we saved it
 
 constraints
@@ -441,7 +441,7 @@ constraints
 
 indexes
   UNIQUE (psp_reference)             idempotency, one-statement insert
-  (merchant_id, captured_at)         merchant history
+  (merchant_id, payment_time)         merchant history
   (status) WHERE status = 2          review queue, small partial index
 ```
 
@@ -458,7 +458,7 @@ Rules:
   fail the insert.
 - **One table, not split.** 1:1 data, written in one insert, read together.
   Row ~250 bytes: ~90 GB/year at 1M payments/day. At high volume, partition
-  by month on `captured_at`, not by columns.
+  by month on `payment_time`, not by columns.
 
 Compliance:
 

@@ -14,9 +14,9 @@ servers:
     description: local
 
 paths:
-  /v1/payments/capture:
+  /v1/payments:
     post:
-      summary: PSP reports a captured payment
+      summary: PSP reports a payment
       description: |
         Money is already taken from the customer by the PSP.
         PSP sends customer location, not tax. Digital goods only.
@@ -27,7 +27,7 @@ paths:
           - customerVatId present and country != MoR country -> B2B reverse charge, 0% tax
           - otherwise B2C at the standard rate of the tax country
         Idempotent on pspReference: a retry returns the original answer.
-      operationId: capturePayment
+      operationId: createPayment
       requestBody:
         required: true
         content:
@@ -62,4 +62,4 @@ paths:
                 $ref: './definitions.yaml#/components/schemas/PaymentResponse'
               example:
                 status: FAILED
-                reason: AMOUNT_BELOW_FEE
+                reason: INVALID_REQUEST

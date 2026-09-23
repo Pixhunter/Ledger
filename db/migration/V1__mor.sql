@@ -73,10 +73,10 @@ CREATE TABLE mor.tax_rate
 
 
 -- ---------------------------------------------------------------------------
--- payment: one row per PSP capture event. The business fact - what the
+-- payment: one row per payment reported by the PSP. The business fact - what the
 -- customer paid and how it split. Money movement lives in ledger_entry.
 --
--- Everything except status is frozen at capture: amounts, rate, category,
+-- Everything except status is frozen when recorded: amounts, rate, category,
 -- country. A later rate change or a merchant moving country must never
 -- rewrite history.
 -- ---------------------------------------------------------------------------
@@ -92,12 +92,12 @@ CREATE TABLE mor.payment
     currency       text        NOT NULL,
     tax_country    text        NULL,                 -- result of the evidence vote
     tax_category   smallint    NULL,                 -- TaxCategory
-    tax_rate_bps   int         NULL,                 -- frozen at capture
+    tax_rate_bps   int         NULL,                 -- frozen when recorded
     reverse_charge boolean     NOT NULL DEFAULT false,
     evidence       jsonb       NOT NULL,             -- {"billing":"ES","card":"AU","ip":"ES","vatId":null}
     status         smallint    NOT NULL,             -- PaymentStatus: 1 POSTED, 2 HELD, 3 FAILED
     hold_reason    smallint    NULL,                 -- HoldReason: 1 UNKNOWN_MERCHANT, 2 TAX_UNRESOLVED
-    captured_at    timestamptz NOT NULL,             -- from the PSP: the tax point
+    payment_time   timestamptz NOT NULL,             -- from the PSP: the tax point
     created_at     timestamptz NOT NULL DEFAULT now(),
 
     CONSTRAINT payment_split_ck    CHECK (gross = tax + fee + merchant_net),
@@ -109,7 +109,7 @@ CREATE TABLE mor.payment
 );
 
 CREATE UNIQUE INDEX payment_psp_reference_uk ON mor.payment (psp_reference);
-CREATE INDEX payment_merchant_idx ON mor.payment (merchant_id, captured_at);
+CREATE INDEX payment_merchant_idx ON mor.payment (merchant_id, payment_time);
 CREATE INDEX payment_held_idx ON mor.payment (status) WHERE status = 2;
 
 

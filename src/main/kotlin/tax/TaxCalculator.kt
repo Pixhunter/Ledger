@@ -1,43 +1,19 @@
 package org.example.tax
 
-import org.example.model.enums.Currency
 import java.math.BigDecimal
 import java.math.RoundingMode
 
 object TaxCalculator {
-    fun split(
-        gross: Long,
-        currency: Currency,
-        jurisdiction: String,
-        taxRate: BasisPoints,
-        feeRate: BasisPoints,
-        reverseCharge: Boolean = false,
-    ): Split {
+
+    fun tax(gross: Long, rate: BasisPoints, reverseCharge: Boolean = false): Long {
         require(gross > 0) { "gross must be positive, was $gross" }
+        if (reverseCharge) return 0
+        return divide(gross * rate.value.toLong(), 10_000L + rate.value)
+    }
 
-        val tax = when {
-            reverseCharge -> 0L
-            else -> divide(gross * taxRate.value, 10_000L + taxRate.value)
-        }
-
-        val net = gross - tax
-        val fee = divide(net * feeRate.value, 10_000L)
-        val merchant = net - fee
-
-        check(merchant >= 0) {
-            "fee and tax exceed the captured amount: gross=$gross tax=$tax fee=$fee"
-        }
-
-        return Split(
-            gross = gross,
-            tax = tax,
-            fee = fee,
-            merchant = merchant,
-            currency = currency,
-            jurisdiction = jurisdiction,
-            taxRate = taxRate,
-            reverseCharge = reverseCharge,
-        )
+    fun fee(net: Long, rate: BasisPoints): Long {
+        require(net >= 0) { "net must not be negative, was $net" }
+        return divide(net * rate.value.toLong(), 10_000L)
     }
 
     private fun divide(numerator: Long, denominator: Long): Long =

@@ -1,6 +1,6 @@
 package org.example.service
 
-import org.example.api.generated.model.ErrorReasonDto
+import org.example.model.RejectReason
 import org.example.model.PaymentWrite
 import org.example.model.PaymentEntity
 import org.example.model.enums.HoldReason
@@ -9,7 +9,6 @@ import org.example.model.enums.PaymentStatus
 import org.example.model.enums.TaxCategory
 import org.example.repository.PaymentStore
 import org.example.tax.BasisPoints
-import org.example.tax.Split
 import org.example.tax.TaxCalculator
 import org.example.tax.TaxCountryVote
 import org.example.tax.TaxRates
@@ -27,10 +26,10 @@ import java.util.UUID
  * Rejections are therefore limited to requests that are malformed, where
  * nothing was owed to anyone in the first place.
  *
- *   1. shape        -> 400 INVALID_REQUEST       (mapper)
+ *   1. shape        -> 400 INVALID_REQUEST       (controller)
  *   2. tax country  -> HELD (TAX_UNRESOLVED)
  *   3. tax rate     -> HELD (TAX_UNRESOLVED)
- *   4. split maths  -> 422 AMOUNT_BELOW_FEE      (nothing to record)
+ *   4. split maths  -> 400 INVALID_REQUEST       (nothing to record)
  *   5. merchant     -> HELD (UNKNOWN_MERCHANT)
  *   6. one write
  */
@@ -77,23 +76,19 @@ class PaymentService(
             return hold(request, evidence, HoldReason.TAX_UNRESOLVED, taxCountry)
         }
 
-        // 4. Does the money actually split? A capture below our own fee is a
-        //    broken request, not money to hold.
-        val split = runCatching {
-            TaxCalculator.split(
-                gross = request.amount,
-                currency = request.currency,
-                jurisdiction = taxCountry,
-                taxRate = rate,
-                feeRate = feeRate,
-                reverseCharge = reverseCharge,
-            )
-        }.getOrElse { e ->
-            log.warn("split failed for {}: {}", request.pspReference, e.message)
-            return PaymentResult.Rejected(ErrorReasonDto.AMOUNT_BELOW_FEE)
-        }
+        // 4. Last guard before the write. Nothing here can fail through the
+        //    API - the mapper already rejects a non-positive amount, and the
+        //    fee is taken from the net, so the merchant share cannot go
+        //    negative. It stays because the service is called directly too.
+        val gross = request.amount
+        val tax = runCatching { TaxCalculator.tax(gross, rate, reverseCharge) }
+            .getOrElse { e ->
+                log.warn("split failed for {}: {}", request.pspReference, e.message)
+                return PaymentResult.Rejected(RejectReason.INVALID_REQUEST)
+            }
+        val fee = TaxCalculator.fee(gross - tax, feeRate)
 
-        // 5. Unknown merchant: correct split, nobody to owe it to yet.
+        // 5. Unknown merchant: the split is correct, nobody to owe it to yet.
         val known = merchants.exists(request.merchantId)
         if (!known) {
             log.error("HELD UNKNOWN_MERCHANT {} on {}", request.merchantId, request.pspReference)
@@ -103,10 +98,10 @@ class PaymentService(
             id = UUID.randomUUID(),
             pspReference = request.pspReference,
             merchantId = request.merchantId,
-            gross = split.gross,
-            tax = split.tax,
-            fee = split.fee,
-            merchantNet = split.merchant,
+            gross = gross,
+            tax = tax,
+            fee = fee,
+            merchantNet = gross - tax - fee,
             currency = request.currency,
             taxCountry = taxCountry,
             taxCategory = taxCategory,
@@ -118,7 +113,7 @@ class PaymentService(
             paymentTime = request.paymentTime,
         )
 
-        return write(payment, split)
+        return write(payment)
     }
 
     /** Recorded but frozen: money we hold and cannot yet attribute. */
@@ -147,15 +142,15 @@ class PaymentService(
             paymentTime = request.paymentTime,
         )
 
-        return write(payment, split = null)
+        return write(payment)
     }
 
-    private suspend fun write(payment: PaymentEntity, split: Split?): PaymentResult =
+    private suspend fun write(payment: PaymentEntity): PaymentResult =
         when (payments.insert(payment, PaymentEntries.of(payment))) {
             is PaymentWrite.Duplicate -> PaymentResult.Duplicate
             PaymentWrite.Inserted -> when (payment.status) {
-                PaymentStatus.HELD -> PaymentResult.Held(split)
-                else -> PaymentResult.Posted(split!!)
+                PaymentStatus.HELD -> PaymentResult.Held
+                else -> PaymentResult.Posted
             }
         }
 }

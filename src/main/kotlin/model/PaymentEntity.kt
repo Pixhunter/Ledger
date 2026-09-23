@@ -35,6 +35,10 @@ data class PaymentEntity(
     val paymentTime: Instant,
 ) {
     init {
+        require(gross > 0) { "gross must be positive, was $gross" }
+        require(tax >= 0 && fee >= 0 && merchantNet >= 0) {
+            "no part of a payment may be negative: tax=$tax fee=$fee merchantNet=$merchantNet"
+        }
         require(gross == tax + fee + merchantNet) {
             "split does not reconcile: $gross != $tax + $fee + $merchantNet"
         }

@@ -14,11 +14,6 @@ object PaymentEntries {
 
         add(LedgerEntry(PaymentPurpose.PSP, null, payment.gross, currency))
 
-        if (held && payment.taxCountry == null) {
-            add(LedgerEntry(PaymentPurpose.HELD, merchantKey, -payment.gross, currency))
-            return@buildList
-        }
-
         if (payment.tax != 0L) {
             add(LedgerEntry(PaymentPurpose.TAX, payment.taxCountry, -payment.tax, currency))
         }
