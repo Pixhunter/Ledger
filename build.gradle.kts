@@ -197,6 +197,14 @@ tasks.test {
         events("skipped", "failed")
     }
 
+    // One JVM, one container. A second fork would start a second Postgres,
+    // and on a laptop that is how a test run turns into a swap storm. Classes
+    // that need the database queue behind each other instead; the container
+    // starts once for the whole run and Ryuk removes it at exit.
+    maxParallelForks = 1
+    forkEvery = 0
+    systemProperty("junit.jupiter.execution.parallel.enabled", "false")
+
     // Testcontainers looks for DOCKER_HOST, then /var/run/docker.sock. Colima
     // and Rancher Desktop put their socket under the user's home instead, so
     // the lookup fails and every database test dies with "Could not find a

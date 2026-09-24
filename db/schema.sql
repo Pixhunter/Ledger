@@ -5,7 +5,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict Vd3dqwVRcdVjlBPQpzZaWwwGJOj84dVYublyCJSYwbZSWpum1MYz0y6wQfX1qby
+\restrict 9Yyew7N60zWBbg9QEC5Z0d7odGdYtdW0vwoigqUst8DgQCh55nq9bg83AvEjs1F
 
 -- Dumped from database version 17.11
 -- Dumped by pg_dump version 17.11
@@ -135,7 +135,7 @@ CREATE TABLE mor.payment (
     evidence jsonb NOT NULL,
     status smallint NOT NULL,
     hold_reason smallint,
-    captured_at timestamp with time zone NOT NULL,
+    payment_time timestamp with time zone NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT payment_amounts_ck CHECK (((gross > 0) AND (tax >= 0) AND (fee >= 0) AND (merchant_net >= 0))),
     CONSTRAINT payment_country_ck CHECK (((tax_country IS NULL) OR (tax_country ~ '^[A-Z]{2}$'::text))),
@@ -267,7 +267,7 @@ CREATE INDEX payment_held_idx ON mor.payment USING btree (status) WHERE (status 
 -- Name: payment_merchant_idx; Type: INDEX; Schema: mor; Owner: -
 --
 
-CREATE INDEX payment_merchant_idx ON mor.payment USING btree (merchant_id, captured_at);
+CREATE INDEX payment_merchant_idx ON mor.payment USING btree (merchant_id, payment_time);
 
 
 --
@@ -328,5 +328,5 @@ ALTER TABLE ONLY mor.payout
 -- PostgreSQL database dump complete
 --
 
-\unrestrict Vd3dqwVRcdVjlBPQpzZaWwwGJOj84dVYublyCJSYwbZSWpum1MYz0y6wQfX1qby
+\unrestrict 9Yyew7N60zWBbg9QEC5Z0d7odGdYtdW0vwoigqUst8DgQCh55nq9bg83AvEjs1F
 

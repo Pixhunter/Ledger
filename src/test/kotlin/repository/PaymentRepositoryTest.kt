@@ -1,9 +1,6 @@
 package org.example.repository
 
 import kotlinx.coroutines.runBlocking
-import org.example.db.Database
-import org.example.db.Migrations
-import org.example.config.DatabaseConfig
 import org.example.jooq.tables.references.LEDGER_ENTRY
 import org.example.jooq.tables.references.LEDGER_TRANSACTION
 import org.example.jooq.tables.references.PAYMENT
@@ -17,51 +14,20 @@ import org.example.model.enums.LedgerTransactionType
 import org.example.model.enums.PaymentPurpose
 import org.example.model.enums.PaymentStatus
 import org.example.model.enums.TaxCategory
-import org.jooq.DSLContext
-import org.jooq.impl.DSL
-import org.junit.jupiter.api.Assumptions.assumeTrue
-import org.testcontainers.DockerClientFactory
-import org.testcontainers.containers.PostgreSQLContainer
+import org.example.support.PostgresTest
 import java.time.Instant
 import java.util.UUID
-import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
-/**
- * Runs the real migration against a real Postgres. An in-memory database
- * would not have jsonb, partial indexes, or the CHECK constraints that carry
- * half the invariants, so it would prove nothing about what actually ships.
- *
- * Needs Docker. One container is shared by every test in the class and the
- * tables are truncated between them - starting a container per test costs
- * seconds each.
- */
-class PaymentRepositoryTest {
+class PaymentRepositoryTest : PostgresTest() {
 
     private val merchantId = UUID.randomUUID()
     private val paymentTime = Instant.parse("2026-09-22T10:15:30Z")
-
-    /**
-     * In a transaction on purpose: the pool runs with autoCommit off, so an
-     * uncommitted statement is rolled back when the connection goes back to
-     * Hikari and the truncate would silently do nothing.
-     */
-    @BeforeTest
-    fun start() {
-        assumeTrue(dockerAvailable, "Docker is not running - database tests skipped")
-        clean()
-    }
-
-    private fun clean() = dsl.transaction { cfg ->
-        val db = DSL.using(cfg)
-        db.truncate(LEDGER_ENTRY).cascade().execute()
-        db.truncate(LEDGER_TRANSACTION).cascade().execute()
-        db.truncate(PAYMENT).cascade().execute()
-    }
+    private val repository by lazy { PaymentRepository(dsl) }
 
     @Test
     fun `stores the payment, its transaction and its entries in one go`() {
@@ -212,36 +178,5 @@ class PaymentRepositoryTest {
                 payment.currency,
             ),
         )
-    }
-
-    companion object {
-
-        /**
-         * Everything below is lazy so that a clone without Docker reports
-         * these tests as skipped rather than failing the whole build. A
-         * container started in an initialiser throws before any assumption
-         * can run.
-         */
-        private val dockerAvailable: Boolean =
-            runCatching { DockerClientFactory.instance().isDockerAvailable }.getOrDefault(false)
-
-        private val postgres: PostgreSQLContainer<*> by lazy {
-            PostgreSQLContainer("postgres:16-alpine").apply { start() }
-        }
-
-        private val dsl: DSLContext by lazy {
-            val dataSource = Database.dataSource(
-                DatabaseConfig(
-                    url = postgres.jdbcUrl,
-                    user = postgres.username,
-                    password = postgres.password,
-                    poolSize = 2,
-                )
-            )
-            Migrations.run(dataSource)
-            Database.dslContext(dataSource)
-        }
-
-        private val repository: PaymentRepository by lazy { PaymentRepository(dsl) }
     }
 }
