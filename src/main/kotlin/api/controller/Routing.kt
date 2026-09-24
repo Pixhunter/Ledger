@@ -10,8 +10,16 @@ import org.example.api.security.PspSignature
 /** Server-to-server endpoints. */
 fun Application.apiRoutes(controller: LedgerController) {
     routing {
-        post("/v1/payments") {
+        post("/v1/payment/capture") {
             val response = controller.createPayment(
+                rawBody = call.receiveText(),
+                signatureHeader = call.request.headers[PspSignature.HEADER],
+            )
+            call.respond(response.status, response.body)
+        }
+
+        post("/v1/payment/refund") {
+            val response = controller.createRefund(
                 rawBody = call.receiveText(),
                 signatureHeader = call.request.headers[PspSignature.HEADER],
             )

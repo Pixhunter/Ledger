@@ -62,6 +62,72 @@ components:
         - INVALID_REQUEST
       examples: [ INVALID_REQUEST ]
 
+    RefundRequest:
+      description: |
+        The PSP has already returned the money to the customer. 
+        This is a notification
+      type: object
+      required:
+        - refundReference
+        - pspReference
+        - amount
+        - currency
+        - success
+        - refundedAt
+      properties:
+        refundReference:
+          description: The refund's own PSP id, new for every refund. Idempotency key.
+          $ref: '#/components/schemas/IdempotencyToken'
+        pspReference:
+          description: The original payment's PSP id. Lookup key.
+          $ref: '#/components/schemas/IdempotencyToken'
+        amount:
+          description: Refunded amount, at most what is left to refund on the payment.
+          $ref: '#/components/schemas/Amount'
+        currency:
+          description: Must equal the payment's currency.
+          $ref: '#/components/schemas/Currency'
+        success:
+          description: false means the refund failed at the PSP. Nothing is recorded.
+          type: boolean
+        reason:
+          $ref: '#/components/schemas/RefundReason'
+        refundedAt:
+          description: When the PSP refunded. Decides the period the tax is reduced in.
+          type: string
+          format: date-time
+
+    RefundResponse:
+      type: object
+      required: [ status ]
+      properties:
+        status:
+          $ref: '#/components/schemas/RefundStatus'
+        reason:
+          description: Only when NOT_PROCESSED because the request was broken.
+          $ref: '#/components/schemas/ErrorReason'
+
+    RefundStatus:
+      description: |
+        The payment's status after the refund. NOT_PROCESSED means nothing was
+        recorded: the refund failed at the PSP, or the request was broken.
+      type: string
+      enum:
+        - PARTIALLY_REFUNDED
+        - REFUNDED
+        - NOT_PROCESSED
+      examples: [ PARTIALLY_REFUNDED ]
+
+    RefundReason:
+      type: string
+      enum:
+        - DUPLICATE
+        - FRAUD
+        - CUSTOMER_REQUEST
+        - PRODUCT_ISSUE
+        - OTHER
+      examples: [ CUSTOMER_REQUEST ]
+
     Currency:
       description: Currency in alphabetic format (ISO 4217)
       type: string

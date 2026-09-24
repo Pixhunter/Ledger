@@ -14,19 +14,11 @@ servers:
     description: local
 
 paths:
-  /v1/payments:
+  /v1/payment/capture:
     post:
       summary: PSP reports a payment
       description: |
         Money is already taken from the customer by the PSP.
-        PSP sends customer location, not tax. Digital goods only.
-        Ledger derives tax from the customer's residence, never the merchant's:
-          - tax country = country backed by at least 2 of
-            billingAddress.country, cardIssuingCountry, ipCountry;
-            on conflict billing country wins and the conflict is logged
-          - customerVatId present and country != MoR country -> B2B reverse charge, 0% tax
-          - otherwise B2C at the standard rate of the tax country
-        Idempotent on pspReference: a retry returns the original answer.
       operationId: createPayment
       requestBody:
         required: true
@@ -62,4 +54,45 @@ paths:
                 $ref: './definitions.yaml#/components/schemas/PaymentResponse'
               example:
                 status: FAILED
+                reason: INVALID_REQUEST
+
+  /v1/payment/refund:
+    post:
+      summary: PSP reports a refund
+      description: |
+        The money has already left: approval happened earlier, in the refund
+        service, and the PSP has paid the customer back. The ledger records the
+        refund and never declines it.
+      operationId: createRefund
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: './definitions.yaml#/components/schemas/RefundRequest'
+            example:
+              refundReference: '9915116497253970'
+              pspReference: '8835116497253962'
+              amount: 5000
+              currency: EUR
+              success: true
+              reason: CUSTOMER_REQUEST
+              refundedAt: 2026-09-25T09:30:00Z
+      responses:
+        '200':
+          description: Recorded
+          content:
+            application/json:
+              schema:
+                $ref: './definitions.yaml#/components/schemas/RefundResponse'
+              example:
+                status: PARTIALLY_REFUNDED
+        '4XX':
+          description: Rejected
+          content:
+            application/json:
+              schema:
+                $ref: './definitions.yaml#/components/schemas/RefundResponse'
+              example:
+                status: NOT_PROCESSED
                 reason: INVALID_REQUEST
