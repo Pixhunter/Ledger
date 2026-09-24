@@ -43,7 +43,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: './definitions.yaml#/components/schemas/PaymentResponse'
+                $ref: './definitions.yaml#/components/schemas/LedgerResponse'
               example:
                 status: SUCCESS
         '4XX':
@@ -51,7 +51,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: './definitions.yaml#/components/schemas/PaymentResponse'
+                $ref: './definitions.yaml#/components/schemas/LedgerResponse'
               example:
                 status: FAILED
                 reason: INVALID_REQUEST
@@ -84,15 +84,15 @@ paths:
           content:
             application/json:
               schema:
-                $ref: './definitions.yaml#/components/schemas/RefundResponse'
+                $ref: './definitions.yaml#/components/schemas/LedgerResponse'
               example:
-                status: PARTIALLY_REFUNDED
+                status: SUCCESS
         '4XX':
           description: Rejected
           content:
             application/json:
               schema:
-                $ref: './definitions.yaml#/components/schemas/RefundResponse'
+                $ref: './definitions.yaml#/components/schemas/LedgerResponse'
               example:
-                status: NOT_PROCESSED
+                status: FAILED
                 reason: INVALID_REQUEST

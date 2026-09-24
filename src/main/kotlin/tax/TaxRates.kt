@@ -1,29 +1,41 @@
 package org.example.tax
 
-/**
- * Standard rate per tax country.
- *
- * Illustrative only. A real MoR uses a rates service (Avalara, Stripe Tax,
- * Vertex): rates change, differ by product category, and in the US vary by
- * city and district. Returning null rather than throwing keeps "we do not
- * support this country" an ordinary decision the caller answers the PSP with,
- * not an exception.
- */
 class TaxRates(
-    private val rates: Map<String, BasisPoints> = DEFAULTS,
+    private val rates: Map<String, BasisPoints> = EU_STANDARD,
 ) {
     fun lookup(country: String): BasisPoints? = rates[country.uppercase()]
 
     fun supported(): Set<String> = rates.keys
 
     companion object {
-        val DEFAULTS: Map<String, BasisPoints> = mapOf(
+        val EU_STANDARD: Map<String, BasisPoints> = mapOf(
+            "AT" to BasisPoints(2000),
+            "BE" to BasisPoints(2100),
+            "BG" to BasisPoints(2000),
+            "CY" to BasisPoints(1900),
+            "CZ" to BasisPoints(2100),
             "DE" to BasisPoints(1900),
-            "FR" to BasisPoints(2000),
-            "GB" to BasisPoints(2000),
+            "DK" to BasisPoints(2500),
+            "EE" to BasisPoints(2400),
             "ES" to BasisPoints(2100),
+            "FI" to BasisPoints(2550),
+            "FR" to BasisPoints(2000),
             "GR" to BasisPoints(2400),
-            "AU" to BasisPoints(1000),
+            "HR" to BasisPoints(2500),
+            "HU" to BasisPoints(2700),
+            "IE" to BasisPoints(2300),
+            "IT" to BasisPoints(2200),
+            "LT" to BasisPoints(2100),
+            "LU" to BasisPoints(1700),
+            "LV" to BasisPoints(2100),
+            "MT" to BasisPoints(1800),
+            "NL" to BasisPoints(2100),
+            "PL" to BasisPoints(2300),
+            "PT" to BasisPoints(2300),
+            "RO" to BasisPoints(2100),
+            "SE" to BasisPoints(2500),
+            "SI" to BasisPoints(2200),
+            "SK" to BasisPoints(2300),
         )
     }
 }

@@ -84,6 +84,8 @@ data class MorConfig(
     val country: String = "DE",
     /** Flat MoR fee on the gross, basis points. 500 = 5.00%. */
     val feeBasisPoints: Int = 500,
+    /** Refund reasons for which the MoR gives its fee back: ours to blame. */
+    val refundFeeReturnedFor: List<String> = listOf("DUPLICATE", "FRAUD"),
 )
 
 @JsonIgnoreProperties(ignoreUnknown = true)

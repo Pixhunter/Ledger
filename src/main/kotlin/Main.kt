@@ -17,12 +17,15 @@ import org.example.config.AppConfig
 import org.example.db.Database
 import org.example.db.Migrations
 import org.example.repository.PaymentRepository
+import org.example.repository.RefundRepository
 import org.example.service.MerchantRegistry
 import org.example.service.PaymentService
+import org.example.service.RefundFeePolicy
+import org.example.service.RefundService
 import org.example.tax.BasisPoints
 import org.example.tax.TaxRates
 import org.slf4j.LoggerFactory
-import org.example.api.paymentRejected
+import org.example.api.rejected
 
 private val log = LoggerFactory.getLogger("Main")
 
@@ -49,7 +52,12 @@ fun main() {
         morCountry = config.mor.country,
     )
 
-    val controller = LedgerController(payments, signature)
+    val refunds = RefundService(
+        refunds = RefundRepository(dsl),
+        feePolicy = RefundFeePolicy.of(config.mor.refundFeeReturnedFor),
+    )
+
+    val controller = LedgerController(payments, refunds, signature)
 
     embeddedServer(Netty, host = config.server.host, port = config.server.port) {
         install(ContentNegotiation) { json() }
@@ -62,7 +70,7 @@ fun main() {
                 log.warn("bad request: {}", cause.message)
                 call.respond(
                     HttpStatusCode.BadRequest,
-                    paymentRejected(ErrorReasonDto.INVALID_REQUEST),
+                    rejected(ErrorReasonDto.INVALID_REQUEST),
                 )
             }
         }

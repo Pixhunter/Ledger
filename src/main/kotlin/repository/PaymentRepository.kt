@@ -5,7 +5,7 @@ import org.example.db.io
 import org.example.jooq.tables.references.LEDGER_ENTRY
 import org.example.jooq.tables.references.LEDGER_TRANSACTION
 import org.example.jooq.tables.references.PAYMENT
-import org.example.model.PaymentWrite
+import org.example.model.LedgerWrite
 import org.example.model.LedgerEntry
 import org.example.model.enums.LedgerTransactionType
 import org.example.model.PaymentEntity
@@ -25,7 +25,7 @@ class PaymentRepository(private val dsl: DSLContext) : PaymentStore {
     override suspend fun insert(
         payment: PaymentEntity,
         entries: List<LedgerEntry>,
-    ): PaymentWrite = io {
+    ): LedgerWrite = io {
         // The invariant, checked before it reaches the database. Per currency,
         // because summing across currencies is meaningless. A table CHECK
         // cannot see sibling rows, so this is where it lives.
@@ -78,9 +78,8 @@ class PaymentRepository(private val dsl: DSLContext) : PaymentStore {
 
                 log.info("replay of {}, nothing written", payment.pspReference)
 
-                return@transactionResult PaymentWrite.Duplicate(
-                    status = enumById<PaymentStatus>(existing[PAYMENT.STATUS]!!),
-                    holdReason = existing[PAYMENT.HOLD_REASON]?.let { enumById<HoldReason>(it) },
+                return@transactionResult LedgerWrite.Duplicate(
+                    enumById<PaymentStatus>(existing[PAYMENT.STATUS]!!)
                 )
             }
 
@@ -126,7 +125,7 @@ class PaymentRepository(private val dsl: DSLContext) : PaymentStore {
                 payment.holdReason?.let { " ($it)" } ?: "",
             )
 
-            PaymentWrite.Inserted
+            LedgerWrite.Inserted(payment.status)
         }
     }
 }

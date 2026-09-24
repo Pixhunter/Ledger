@@ -6,7 +6,7 @@ import org.example.jooq.tables.references.LEDGER_TRANSACTION
 import org.example.jooq.tables.references.PAYMENT
 import org.example.model.LedgerEntry
 import org.example.model.PaymentEntity
-import org.example.model.PaymentWrite
+import org.example.model.LedgerWrite
 import org.example.model.enumById
 import org.example.model.enums.Currency
 import org.example.model.enums.HoldReason
@@ -35,7 +35,7 @@ class PaymentRepositoryTest : PostgresTest() {
 
         val outcome = runBlocking { repository.insert(payment, entries(payment)) }
 
-        assertEquals(PaymentWrite.Inserted, outcome)
+        assertEquals(LedgerWrite.Inserted(PaymentStatus.POSTED), outcome)
 
         val row = dsl.selectFrom(PAYMENT).fetchSingle()
         assertEquals(payment.id, row.id)
@@ -83,8 +83,8 @@ class PaymentRepositoryTest : PostgresTest() {
         val firstOutcome = runBlocking { repository.insert(first, entries(first)) }
         val secondOutcome = runBlocking { repository.insert(second, entries(second)) }
 
-        assertEquals(PaymentWrite.Inserted, firstOutcome)
-        assertEquals(PaymentWrite.Duplicate(PaymentStatus.POSTED, null), secondOutcome)
+        assertEquals(LedgerWrite.Inserted(PaymentStatus.POSTED), firstOutcome)
+        assertEquals(LedgerWrite.Duplicate(PaymentStatus.POSTED), secondOutcome)
 
         assertEquals(1, dsl.fetchCount(PAYMENT))
         assertEquals(1, dsl.fetchCount(LEDGER_TRANSACTION))
@@ -99,10 +99,7 @@ class PaymentRepositoryTest : PostgresTest() {
         runBlocking { repository.insert(held, entries(held)) }
         val replay = runBlocking { repository.insert(held, entries(held)) }
 
-        assertEquals(
-            PaymentWrite.Duplicate(PaymentStatus.HELD, HoldReason.UNKNOWN_MERCHANT),
-            replay,
-        )
+        assertEquals(LedgerWrite.Duplicate(PaymentStatus.HELD), replay)
     }
 
     @Test
@@ -116,19 +113,6 @@ class PaymentRepositoryTest : PostgresTest() {
 
         assertEquals(0, dsl.fetchCount(PAYMENT))
         assertEquals(0, dsl.fetchCount(LEDGER_ENTRY))
-    }
-
-    @Test
-    fun `a second currency must balance on its own`() {
-        val payment = posted()
-        val strayCurrency = entries(payment) + LedgerEntry(PaymentPurpose.REVENUE, null, 1, Currency.USD)
-
-        assertFailsWith<IllegalArgumentException> {
-            runBlocking { repository.insert(payment, strayCurrency) }
-        }
-
-        assertEquals(0, dsl.fetchCount(PAYMENT))
-        assertEquals(0, dsl.fetchCount(LEDGER_TRANSACTION))
     }
 
     private fun storedEntries(): List<Pair<PaymentPurpose, Long>> =

@@ -4,8 +4,7 @@ import kotlinx.coroutines.runBlocking
 import org.example.model.LedgerEntry
 import org.example.model.PaymentEntity
 import org.example.model.PaymentModel
-import org.example.model.PaymentWrite
-import org.example.model.RejectReason
+import org.example.model.LedgerWrite
 import org.example.model.enums.Currency
 import org.example.model.enums.HoldReason
 import org.example.model.enums.PaymentPurpose
@@ -30,7 +29,7 @@ class PaymentServiceTest {
 
         val result = run(store, request())
 
-        assertEquals(PaymentResult.Posted, result)
+        assertEquals(LedgerResult.Recorded(PaymentStatus.POSTED), result)
         val payment = store.single()
         assertEquals(PaymentStatus.POSTED, payment.status)
         assertNull(payment.holdReason)
@@ -60,7 +59,7 @@ class PaymentServiceTest {
 
         val result = run(store, request(country = "JP"))
 
-        assertEquals(PaymentResult.Held, result)
+        assertEquals(LedgerResult.Recorded(PaymentStatus.HELD), result)
         val payment = store.single()
         assertEquals(PaymentStatus.HELD, payment.status)
         assertEquals(HoldReason.TAX_UNRESOLVED, payment.holdReason)
@@ -75,7 +74,7 @@ class PaymentServiceTest {
 
         val result = run(store, request(), known = setOf(UUID.randomUUID()))
 
-        assertEquals(PaymentResult.Held, result)
+        assertEquals(LedgerResult.Recorded(PaymentStatus.HELD), result)
         val payment = store.single()
         assertEquals(PaymentStatus.HELD, payment.status)
         assertEquals(HoldReason.UNKNOWN_MERCHANT, payment.holdReason)
@@ -98,28 +97,18 @@ class PaymentServiceTest {
 
     @Test
     fun `a replay is reported as a duplicate and decided only once`() {
-        val store = RecordingStore(PaymentWrite.Duplicate(PaymentStatus.POSTED, null))
+        val store = RecordingStore(LedgerWrite.Duplicate(PaymentStatus.POSTED))
 
         val result = run(store, request())
 
-        assertEquals(PaymentResult.Duplicate, result)
-    }
-
-    @Test
-    fun `rejects a non positive amount`() {
-        val store = RecordingStore()
-
-        val result = run(store, request(amount = 0))
-
-        assertEquals(PaymentResult.Rejected(RejectReason.INVALID_REQUEST), result)
-        assertTrue(store.writes.isEmpty())
+        assertEquals(LedgerResult.Duplicate(PaymentStatus.POSTED), result)
     }
 
     private fun run(
         store: PaymentStore,
         request: PaymentModel,
         known: Set<UUID> = emptySet(),
-    ): PaymentResult = runBlocking {
+    ): LedgerResult = runBlocking {
         PaymentService(
             payments = store,
             rates = TaxRates(),
@@ -147,7 +136,7 @@ class PaymentServiceTest {
     )
 
     private class RecordingStore(
-        private val outcome: PaymentWrite = PaymentWrite.Inserted,
+        private val outcome: LedgerWrite? = null,
     ) : PaymentStore {
 
         val writes = mutableListOf<Pair<PaymentEntity, List<LedgerEntry>>>()
@@ -162,9 +151,9 @@ class PaymentServiceTest {
         override suspend fun insert(
             payment: PaymentEntity,
             entries: List<LedgerEntry>,
-        ): PaymentWrite {
+        ): LedgerWrite {
             writes += payment to entries
-            return outcome
+            return outcome ?: LedgerWrite.Inserted(payment.status)
         }
     }
 }

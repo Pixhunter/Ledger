@@ -1,20 +1,11 @@
 package org.example
 
-import org.example.model.enums.Currency
 import java.time.Instant
 import java.util.UUID
 
 fun String.toUuid(field: String): UUID =
     runCatching { UUID.fromString(this) }
         .getOrElse { throw IllegalArgumentException("$field is not a valid uuid: '$this'") }
-
-fun String.toCurrency(): Currency =
-    runCatching { Currency.valueOf(uppercase()) }
-        .getOrElse {
-            throw IllegalArgumentException(
-                "unsupported currency '$this', expected one of ${Currency.entries.joinToString()}"
-            )
-        }
 
 private val COUNTRY = Regex("^[A-Z]{2}$")
 

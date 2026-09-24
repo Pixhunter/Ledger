@@ -1,7 +1,6 @@
 package org.example.service
 
-import org.example.model.RejectReason
-import org.example.model.PaymentWrite
+import org.example.model.LedgerWrite
 import org.example.model.PaymentEntity
 import org.example.model.enums.HoldReason
 import org.example.model.PaymentModel
@@ -23,15 +22,11 @@ import java.util.UUID
  * recorded and HELD, not refused - a refusal only makes the PSP retry while
  * the cash sits in our bank with no row against it.
  *
- * Rejections are therefore limited to requests that are malformed, where
- * nothing was owed to anyone in the first place.
- *
  *   1. shape        -> 400 INVALID_REQUEST       (controller)
  *   2. tax country  -> HELD (TAX_UNRESOLVED)
  *   3. tax rate     -> HELD (TAX_UNRESOLVED)
- *   4. split maths  -> 400 INVALID_REQUEST       (nothing to record)
- *   5. merchant     -> HELD (UNKNOWN_MERCHANT)
- *   6. one write
+ *   4. merchant     -> HELD (UNKNOWN_MERCHANT)
+ *   5. one write
  */
 class PaymentService(
     private val payments: PaymentStore,
@@ -43,7 +38,7 @@ class PaymentService(
 ) {
     private val log = LoggerFactory.getLogger(PaymentService::class.java)
 
-    suspend fun createPayment(request: PaymentModel): PaymentResult {
+    suspend fun createPayment(request: PaymentModel): LedgerResult {
         val evidence = mapOf(
             "billing" to request.billingCountry,
             "card" to request.cardIssuingCountry,
@@ -51,8 +46,6 @@ class PaymentService(
             "vatId" to request.customerVatId,
         )
 
-        // 2. Which country taxes this sale. Two of three signals must agree;
-        //    otherwise billing wins and the conflict is logged.
         val vote = TaxCountryVote.decide(
             billingCountry = request.billingCountry,
             cardIssuingCountry = request.cardIssuingCountry,
@@ -61,8 +54,6 @@ class PaymentService(
 
         val taxCountry = (vote as? TaxCountryVote.Result.Decided)?.country
 
-        // 3. A country with no rate is the same situation as no country: we
-        //    must not guess, because a guessed rate becomes a wrong tax return.
         val reverseCharge = taxCountry != null && request.isBusiness && taxCountry != morCountry
 
         val rate = when {
@@ -76,19 +67,10 @@ class PaymentService(
             return hold(request, evidence, HoldReason.TAX_UNRESOLVED, taxCountry)
         }
 
-        // 4. Last guard before the write. Nothing here can fail through the
-        //    API - the mapper already rejects a non-positive amount, and the
-        //    fee is taken from the net, so the merchant share cannot go
-        //    negative. It stays because the service is called directly too.
         val gross = request.amount
-        val tax = runCatching { TaxCalculator.tax(gross, rate, reverseCharge) }
-            .getOrElse { e ->
-                log.warn("split failed for {}: {}", request.pspReference, e.message)
-                return PaymentResult.Rejected(RejectReason.INVALID_REQUEST)
-            }
+        val tax = TaxCalculator.tax(gross, rate, reverseCharge)
         val fee = TaxCalculator.fee(gross - tax, feeRate)
 
-        // 5. Unknown merchant: the split is correct, nobody to owe it to yet.
         val known = merchants.exists(request.merchantId)
         if (!known) {
             log.error("HELD UNKNOWN_MERCHANT {} on {}", request.merchantId, request.pspReference)
@@ -122,7 +104,7 @@ class PaymentService(
         evidence: Map<String, String?>,
         reason: HoldReason,
         taxCountry: String?,
-    ): PaymentResult {
+    ): LedgerResult {
         val payment = PaymentEntity(
             id = UUID.randomUUID(),
             pspReference = request.pspReference,
@@ -145,12 +127,10 @@ class PaymentService(
         return write(payment)
     }
 
-    private suspend fun write(payment: PaymentEntity): PaymentResult =
-        when (payments.insert(payment, PaymentEntries.of(payment))) {
-            is PaymentWrite.Duplicate -> PaymentResult.Duplicate
-            PaymentWrite.Inserted -> when (payment.status) {
-                PaymentStatus.HELD -> PaymentResult.Held
-                else -> PaymentResult.Posted
-            }
+    private suspend fun write(payment: PaymentEntity): LedgerResult =
+        when (val write = payments.insert(payment, PaymentEntries.of(payment))) {
+            is LedgerWrite.Duplicate -> LedgerResult.Duplicate(write.paymentStatus)
+            is LedgerWrite.Inserted -> LedgerResult.Recorded(write.paymentStatus)
+            else -> error("a capture cannot answer $write")
         }
 }

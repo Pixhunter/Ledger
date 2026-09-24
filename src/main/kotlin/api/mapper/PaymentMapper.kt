@@ -3,7 +3,6 @@ package org.example.api.mapper
 import org.example.api.generated.model.PaymentRequestDto
 import org.example.model.PaymentModel
 import org.example.toCountry
-import org.example.toCurrency
 import org.example.toInstant
 import org.example.toUuid
 
@@ -27,7 +26,7 @@ object PaymentMapper {
             pspReference = pspReference,
             merchantId = merchantId.toUuid("merchantId"),
             amount = amount,
-            currency = currency.toCurrency(),
+            currency = currency.toDomain(),
             billingCountry = billingAddress?.country?.toCountry("billingAddress.country"),
             stateOrProvince = billingAddress?.stateOrProvince,
             cardIssuingCountry = cardIssuingCountry.toCountry("cardIssuingCountry"),

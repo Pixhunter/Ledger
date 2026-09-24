@@ -36,27 +36,27 @@ components:
           type: string
           format: date-time
 
-    PaymentResponse:
+    LedgerResponse:
+      description: |
+        The answer to every money event the ledger records. 
+        Two outcomes only: the event is recorded, or the request was broken and nothing was written.
       type: object
       required: [ status ]
       properties:
         status:
-          $ref: '#/components/schemas/Status'
+          $ref: '#/components/schemas/ResponseStatus'
         reason:
           description: Only when FAILED.
           $ref: '#/components/schemas/ErrorReason'
 
-    Status:
-      description: Whether the payment was recorded. HELD payments are recorded, so they are SUCCESS.
+    ResponseStatus:
       type: string
       enum: [ SUCCESS, FAILED ]
       examples: [ SUCCESS ]
 
     ErrorReason:
       description: |
-        Why nothing was recorded. Short by design: after capture the money is
-        already taken, so anything we cannot attribute is stored as HELD and
-        answered with SUCCESS. Only a broken request fails.
+        Why nothing was recorded. Only a broken request fails.
       type: string
       enum:
         - INVALID_REQUEST
@@ -97,27 +97,6 @@ components:
           type: string
           format: date-time
 
-    RefundResponse:
-      type: object
-      required: [ status ]
-      properties:
-        status:
-          $ref: '#/components/schemas/RefundStatus'
-        reason:
-          description: Only when NOT_PROCESSED because the request was broken.
-          $ref: '#/components/schemas/ErrorReason'
-
-    RefundStatus:
-      description: |
-        The payment's status after the refund. NOT_PROCESSED means nothing was
-        recorded: the refund failed at the PSP, or the request was broken.
-      type: string
-      enum:
-        - PARTIALLY_REFUNDED
-        - REFUNDED
-        - NOT_PROCESSED
-      examples: [ PARTIALLY_REFUNDED ]
-
     RefundReason:
       type: string
       enum:
@@ -129,9 +108,10 @@ components:
       examples: [ CUSTOMER_REQUEST ]
 
     Currency:
-      description: Currency in alphabetic format (ISO 4217)
+      description: ISO 4217. EUR only for now; more once the MoR settles in them.
       type: string
-      pattern: '^[A-Z]{3}$'
+      enum:
+        - EUR
       examples: [ EUR ]
 
     Amount:
