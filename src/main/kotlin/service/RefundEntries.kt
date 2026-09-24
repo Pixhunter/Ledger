@@ -8,14 +8,25 @@ import java.math.BigDecimal
 import java.math.RoundingMode
 
 // TODO release flow must clear hold_reason, or a refund of a released payment credits HELD.
-// TODO the refund that settles a payment in full should take the remainder of tax and fee,
-//      not its proportional share.
 object RefundEntries {
 
-    fun of(refund: RefundEntity, payment: PaymentEntity): List<LedgerEntry> = buildList {
+    fun of(
+        refund: RefundEntity,
+        payment: PaymentEntity,
+        previousRefundAmounts: List<Long> = emptyList(),
+    ): List<LedgerEntry> = buildList {
         val currency = payment.currency
-        val taxPart = share(refund.amount, payment.tax, payment.gross)
-        val feePart = share(refund.amount, payment.fee, payment.gross)
+        val isFinalRefund = previousRefundAmounts.sum() + refund.amount == payment.gross
+        val taxPart = if (isFinalRefund) {
+            payment.tax - previousRefundAmounts.sumOf { share(it, payment.tax, payment.gross) }
+        } else {
+            share(refund.amount, payment.tax, payment.gross)
+        }
+        val feePart = if (isFinalRefund) {
+            payment.fee - previousRefundAmounts.sumOf { share(it, payment.fee, payment.gross) }
+        } else {
+            share(refund.amount, payment.fee, payment.gross)
+        }
 
         val revenuePart = if (refund.feeReturned) feePart else 0
         val merchantPart = refund.amount - taxPart - revenuePart

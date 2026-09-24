@@ -47,7 +47,11 @@ class RefundService(
             refundedAt = request.refundedAt,
         )
 
-        return when (val write = refunds.insert(refund, RefundEntries.of(refund, payment))) {
+        return when (
+            val write = refunds.insert(refund) { previousRefundAmounts ->
+                RefundEntries.of(refund, payment, previousRefundAmounts)
+            }
+        ) {
             is LedgerWrite.Inserted -> LedgerResult.Recorded(write.paymentStatus)
             is LedgerWrite.Duplicate -> LedgerResult.Duplicate(write.paymentStatus)
 

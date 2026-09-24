@@ -28,7 +28,12 @@ class LedgerController(
     private val json = Json { ignoreUnknownKeys = true }
 
     suspend fun createPayment(rawBody: String, signatureHeader: String?): ApiResponse<LedgerResponseDto> {
-        val request = parse(rawBody, signatureHeader) { json.decodeFromString<PaymentRequestDto>(it).toModel() }
+        if (!signature.verify(rawBody.toByteArray(), signatureHeader)) {
+            log.warn("rejected unsigned payment request")
+            return failed(HttpStatusCode.Unauthorized)
+        }
+
+        val request = parse(rawBody) { json.decodeFromString<PaymentRequestDto>(it).toModel() }
             ?: return failed(HttpStatusCode.BadRequest)
 
         log.info("payment psp={} merchant={}", request.pspReference, request.merchantId)
@@ -37,7 +42,12 @@ class LedgerController(
     }
 
     suspend fun createRefund(rawBody: String, signatureHeader: String?): ApiResponse<LedgerResponseDto> {
-        val request = parse(rawBody, signatureHeader) { json.decodeFromString<RefundRequestDto>(it).toModel() }
+        if (!signature.verify(rawBody.toByteArray(), signatureHeader)) {
+            log.warn("rejected unsigned refund request")
+            return failed(HttpStatusCode.Unauthorized)
+        }
+
+        val request = parse(rawBody) { json.decodeFromString<RefundRequestDto>(it).toModel() }
             ?: return failed(HttpStatusCode.BadRequest)
 
         log.info("refund psp={} refund={}", request.pspReference, request.refundReference)
@@ -45,11 +55,7 @@ class LedgerController(
         return answer(refunds.createRefund(request))
     }
 
-    private fun <T> parse(rawBody: String, signatureHeader: String?, decode: (String) -> T): T? {
-        if (!signature.verify(rawBody.toByteArray(), signatureHeader)) {
-            log.warn("rejected unsigned request")
-            return null
-        }
+    private fun <T> parse(rawBody: String, decode: (String) -> T): T? {
         return runCatching { decode(rawBody) }.getOrElse { e ->
             log.warn("bad request: {}", e.message)
             null

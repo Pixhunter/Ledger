@@ -8,5 +8,8 @@ import org.example.model.LedgerWrite
 interface RefundStore {
 
     suspend fun findPayment(pspReference: String): PaymentEntity?
-    suspend fun insert(refund: RefundEntity, entries: List<LedgerEntry>): LedgerWrite
+    suspend fun insert(
+        refund: RefundEntity,
+        entries: (previousRefundAmounts: List<Long>) -> List<LedgerEntry>,
+    ): LedgerWrite
 }

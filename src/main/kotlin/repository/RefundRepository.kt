@@ -54,13 +54,8 @@ class RefundRepository(private val dsl: DSLContext) : RefundStore {
 
     override suspend fun insert(
         refund: RefundEntity,
-        entries: List<LedgerEntry>,
+        entries: (previousRefundAmounts: List<Long>) -> List<LedgerEntry>,
     ): LedgerWrite = io {
-        entries.groupBy { it.currency }.forEach { (currency, group) ->
-            val sum = group.sumOf { it.amount }
-            require(sum == 0L) { "entries for $currency do not sum to zero: $sum" }
-        }
-
         dsl.transactionResult { cfg ->
             val db = DSL.using(cfg)
 
@@ -97,7 +92,19 @@ class RefundRepository(private val dsl: DSLContext) : RefundStore {
             }
 
             val gross = paymentGross(db, refund.paymentId)
-            val refundedSoFar = refundedSoFar(db, refund.paymentId)
+            val previousRefundAmounts = db.select(REFUND.AMOUNT)
+                .from(REFUND)
+                .where(REFUND.PAYMENT_ID.eq(refund.paymentId))
+                .and(REFUND.ID.ne(refund.id))
+                .fetch(REFUND.AMOUNT)
+                .filterNotNull()
+            val refundedSoFar = previousRefundAmounts.sum() + refund.amount
+            val ledgerEntries = entries(previousRefundAmounts)
+
+            ledgerEntries.groupBy { it.currency }.forEach { (currency, group) ->
+                val sum = group.sumOf { it.amount }
+                require(sum == 0L) { "entries for $currency do not sum to zero: $sum" }
+            }
 
             val transactionId = UUID.randomUUID()
 
@@ -116,7 +123,7 @@ class RefundRepository(private val dsl: DSLContext) : RefundStore {
                 LEDGER_ENTRY.CURRENCY,
             )
 
-            entries.forEach { e ->
+            ledgerEntries.forEach { e ->
                 lines.values(transactionId, e.purpose.id, e.purposeKey, e.amount, e.currency.name)
             }
 
@@ -147,13 +154,6 @@ class RefundRepository(private val dsl: DSLContext) : RefundStore {
             .where(PAYMENT.ID.eq(paymentId))
             .fetchOne(PAYMENT.GROSS)
             ?: error("payment $paymentId disappeared inside its own transaction")
-
-    private fun refundedSoFar(db: DSLContext, paymentId: UUID): Long =
-        db.select(DSL.sum(REFUND.AMOUNT))
-            .from(REFUND)
-            .where(REFUND.PAYMENT_ID.eq(paymentId))
-            .fetchOne(0, Long::class.java)
-            ?: 0L
 
     private fun storedRefund(db: DSLContext, reference: String): RefundEntity =
         db.selectFrom(REFUND)
