@@ -4,6 +4,7 @@ import org.example.model.enums.Currency
 import org.example.model.enums.HoldReason
 import org.example.model.enums.PaymentStatus
 import org.example.model.enums.TaxCategory
+import java.math.BigDecimal
 import java.time.Instant
 import java.util.UUID
 
@@ -18,10 +19,10 @@ data class PaymentEntity(
     val id: UUID,
     val pspReference: String,
     val merchantId: UUID?,
-    val gross: Long,
-    val tax: Long,
-    val fee: Long,
-    val merchantNet: Long,
+    val gross: BigDecimal,
+    val tax: BigDecimal,
+    val fee: BigDecimal,
+    val merchantNet: BigDecimal,
     val currency: Currency,
     val taxCountry: String?,
     val taxCategory: TaxCategory?,
@@ -35,11 +36,11 @@ data class PaymentEntity(
     val paymentTime: Instant,
 ) {
     init {
-        require(gross > 0) { "gross must be positive, was $gross" }
-        require(tax >= 0 && fee >= 0 && merchantNet >= 0) {
+        require(gross.signum() > 0) { "gross must be positive, was $gross" }
+        require(tax.signum() >= 0 && fee.signum() >= 0 && merchantNet.signum() >= 0) {
             "no part of a payment may be negative: tax=$tax fee=$fee merchantNet=$merchantNet"
         }
-        require(gross == tax + fee + merchantNet) {
+        require(gross.compareTo(tax + fee + merchantNet) == 0) {
             "split does not reconcile: $gross != $tax + $fee + $merchantNet"
         }
         require((status == PaymentStatus.HELD) == (holdReason != null)) {

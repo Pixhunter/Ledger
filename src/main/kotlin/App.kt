@@ -10,6 +10,7 @@ import io.ktor.server.response.respond
 import org.example.api.controller.LedgerController
 import org.example.api.controller.apiRoutes
 import org.example.api.controller.devRoutes
+import org.example.api.apiJson
 import org.example.api.generated.model.ErrorReasonDto
 import org.example.api.rejected
 import org.example.api.security.PspSignature
@@ -50,7 +51,7 @@ fun Application.ledgerModule(
         feePolicy = RefundFeePolicy.of(config.mor.refundFeeReturnedFor),
     )
 
-    install(ContentNegotiation) { json() }
+    install(ContentNegotiation) { json(apiJson) }
 
     install(StatusPages) {
         exception<IllegalArgumentException> { call, cause ->

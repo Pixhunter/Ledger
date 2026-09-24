@@ -1,13 +1,14 @@
 package org.example.model
 
 import org.example.model.enums.Currency
+import java.math.BigDecimal
 import java.time.Instant
 import java.util.UUID
 
 data class PaymentModel(
     val pspReference: String,
     val merchantId: UUID,
-    val amount: Long,                 // minor units, tax-inclusive
+    val amount: BigDecimal,           // major units, tax-inclusive
     val currency: Currency,
     val billingCountry: String?,
     val stateOrProvince: String?,

@@ -2,6 +2,7 @@ package org.example.service
 
 import org.example.model.LedgerWrite
 import org.example.model.PaymentEntity
+import org.example.model.Money
 import org.example.model.enums.HoldReason
 import org.example.model.PaymentModel
 import org.example.model.enums.PaymentStatus
@@ -68,8 +69,8 @@ class PaymentService(
         }
 
         val gross = request.amount
-        val tax = TaxCalculator.tax(gross, rate, reverseCharge)
-        val fee = TaxCalculator.fee(gross - tax, feeRate)
+        val tax = TaxCalculator.tax(gross, rate, request.currency, reverseCharge)
+        val fee = TaxCalculator.fee(gross - tax, feeRate, request.currency)
 
         val known = merchants.exists(request.merchantId)
         if (!known) {
@@ -110,8 +111,8 @@ class PaymentService(
             pspReference = request.pspReference,
             merchantId = request.merchantId,
             gross = request.amount,
-            tax = 0,
-            fee = 0,
+            tax = Money.ZERO,
+            fee = Money.ZERO,
             merchantNet = request.amount,     // nothing is split until resolved
             currency = request.currency,
             taxCountry = taxCountry,

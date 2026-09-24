@@ -9,7 +9,6 @@ import org.example.model.LedgerWrite
 import org.example.model.LedgerEntry
 import org.example.model.enums.LedgerTransactionType
 import org.example.model.PaymentEntity
-import org.example.model.enums.HoldReason
 import org.example.model.enumById
 import org.example.model.enums.PaymentStatus
 import org.jooq.DSLContext
@@ -17,6 +16,7 @@ import org.jooq.impl.DSL
 import org.slf4j.LoggerFactory
 import java.time.ZoneOffset
 import java.util.UUID
+import java.math.BigDecimal
 
 class PaymentRepository(private val dsl: DSLContext) : PaymentStore {
 
@@ -30,8 +30,8 @@ class PaymentRepository(private val dsl: DSLContext) : PaymentStore {
         // because summing across currencies is meaningless. A table CHECK
         // cannot see sibling rows, so this is where it lives.
         entries.groupBy { it.currency }.forEach { (currency, group) ->
-            val sum = group.sumOf { it.amount }
-            require(sum == 0L) { "entries for $currency do not sum to zero: $sum" }
+            val sum = group.fold(BigDecimal.ZERO) { total, entry -> total + entry.amount }
+            require(sum.signum() == 0) { "entries for $currency do not sum to zero: $sum" }
         }
 
         dsl.transactionResult { cfg ->

@@ -3,8 +3,11 @@ package org.example.model.enums
 import org.example.model.EnumId
 
 /** EUR only for now. The ledger is already per-currency, so adding one is a new entry here. */
-enum class Currency(override val id: Short) : EnumId {
-    EUR(1)
+enum class Currency(
+    override val id: Short,
+    val fractionDigits: Int,
+) : EnumId {
+    EUR(1, 2)
     ;
 
     companion object {

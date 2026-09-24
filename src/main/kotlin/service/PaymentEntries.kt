@@ -4,6 +4,7 @@ import org.example.model.LedgerEntry
 import org.example.model.enums.PaymentPurpose
 import org.example.model.enums.PaymentStatus
 import org.example.model.PaymentEntity
+import org.example.model.Money
 
 object PaymentEntries {
 
@@ -14,15 +15,15 @@ object PaymentEntries {
 
         add(LedgerEntry(PaymentPurpose.PSP, null, payment.gross, currency))
 
-        if (payment.tax != 0L) {
+        if (!Money.isZero(payment.tax)) {
             add(LedgerEntry(PaymentPurpose.TAX, payment.taxCountry, -payment.tax, currency))
         }
 
-        if (payment.fee != 0L) {
+        if (!Money.isZero(payment.fee)) {
             add(LedgerEntry(PaymentPurpose.REVENUE, null, -payment.fee, currency))
         }
 
-        if (payment.merchantNet != 0L) {
+        if (!Money.isZero(payment.merchantNet)) {
             add(
                 LedgerEntry(
                     purpose = if (held) PaymentPurpose.HELD else PaymentPurpose.MERCHANT,

@@ -2,6 +2,7 @@ package org.example.api.mapper
 
 import org.example.api.generated.model.PaymentRequestDto
 import org.example.model.PaymentModel
+import org.example.model.Money
 import org.example.toCountry
 import org.example.toInstant
 import org.example.toUuid
@@ -16,7 +17,9 @@ object PaymentMapper {
         require(PSP_REF.matches(pspReference)) {
             "pspReference must be 1-64 chars of [A-Za-z0-9_-], was '${pspReference}'"
         }
-        require(amount > 0) { "amount must be positive, was ${amount}" }
+        require(amount.signum() > 0) { "amount must be positive, was ${amount}" }
+
+        val domainCurrency = currency.toDomain()
 
         customerVatId?.let {
             require(VAT_ID.matches(it)) { "customerVatId is malformed: '$it'" }
@@ -25,8 +28,8 @@ object PaymentMapper {
         return PaymentModel(
             pspReference = pspReference,
             merchantId = merchantId.toUuid("merchantId"),
-            amount = amount,
-            currency = currency.toDomain(),
+            amount = Money.amount(amount, domainCurrency),
+            currency = domainCurrency,
             billingCountry = billingAddress?.country?.toCountry("billingAddress.country"),
             stateOrProvince = billingAddress?.stateOrProvince,
             cardIssuingCountry = cardIssuingCountry.toCountry("cardIssuingCountry"),

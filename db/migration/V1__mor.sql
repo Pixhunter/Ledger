@@ -85,10 +85,10 @@ CREATE TABLE mor.payment
     id             uuid        PRIMARY KEY,
     psp_reference  text        NOT NULL,             -- idempotency key, PSP's own id
     merchant_id    uuid        NULL,
-    gross          bigint      NOT NULL,             -- customer paid, tax included
-    tax            bigint      NOT NULL,
-    fee            bigint      NOT NULL,             -- MoR revenue
-    merchant_net   bigint      NOT NULL,
+    gross          numeric(19,4) NOT NULL,            -- major units, customer paid, tax included
+    tax            numeric(19,4) NOT NULL,
+    fee            numeric(19,4) NOT NULL,            -- MoR revenue
+    merchant_net   numeric(19,4) NOT NULL,
     currency       text        NOT NULL,
     tax_country    text        NULL,                 -- result of the evidence vote
     tax_category   smallint    NULL,                 -- TaxCategory
@@ -148,7 +148,7 @@ CREATE TABLE mor.ledger_entry
     transaction_id uuid   NOT NULL REFERENCES mor.ledger_transaction (id),
     purpose        smallint NOT NULL,                -- PaymentPurpose: 1 PSP, 2 TAX, 3 REVENUE, 4 MERCHANT, 5 HELD
     purpose_key    text   NULL,                      -- TAX: country, MERCHANT/HELD: merchant id
-    amount         bigint NOT NULL,                  -- signed: + debit, - credit
+    amount         numeric(19,4) NOT NULL,           -- major units, signed: + debit, - credit
     currency       text   NOT NULL,
 
     CONSTRAINT ledger_entry_amount_ck   CHECK (amount <> 0),
@@ -171,7 +171,7 @@ CREATE TABLE mor.payout
 (
     merchant_id           uuid        NOT NULL REFERENCES mor.merchant (id),
     payout_date           date        NOT NULL,
-    amount                bigint      NOT NULL,
+    amount                numeric(19,4) NOT NULL,
     currency              text        NOT NULL,
     ledger_transaction_id uuid        NOT NULL REFERENCES mor.ledger_transaction (id),
     status                smallint    NOT NULL,      -- PayoutStatus: 1 COMPUTED, 2 SENT, 3 CONFIRMED

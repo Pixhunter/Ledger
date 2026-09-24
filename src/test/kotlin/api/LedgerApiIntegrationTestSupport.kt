@@ -15,6 +15,8 @@ import org.example.api.security.PspSignature
 import org.example.model.enumById
 import org.example.model.enums.PaymentPurpose
 import org.example.support.PostgresTest
+import org.example.support.money
+import java.math.BigDecimal
 import java.time.Instant
 import java.time.temporal.ChronoUnit
 import java.util.UUID
@@ -30,7 +32,7 @@ abstract class LedgerApiIntegrationTestSupport : PostgresTest() {
     protected fun paymentBody(
         pspReference: String = this.pspReference,
         merchantId: UUID = this.merchantId,
-        amount: Long = 12_100,
+        amount: BigDecimal = money("121.00"),
         billingCountry: String? = "ES",
         cardIssuingCountry: String = "ES",
         ipCountry: String? = "ES",
@@ -52,7 +54,7 @@ abstract class LedgerApiIntegrationTestSupport : PostgresTest() {
     protected fun refundBody(
         refundReference: String = this.refundReference,
         pspReference: String = this.pspReference,
-        amount: Long = 12_100,
+        amount: BigDecimal = money("121.00"),
         success: Boolean = true,
         reason: String? = "CUSTOMER_REQUEST",
     ) = """
@@ -101,14 +103,14 @@ abstract class LedgerApiIntegrationTestSupport : PostgresTest() {
             .map { it.intoArray().toList() },
     )
 
-    protected fun entries(): List<Pair<PaymentPurpose, Long>> =
+    protected fun entries(): List<Pair<PaymentPurpose, BigDecimal>> =
         dsl.select(LEDGER_ENTRY.PURPOSE, LEDGER_ENTRY.AMOUNT)
             .from(LEDGER_ENTRY)
             .fetch()
             .map { enumById<PaymentPurpose>(it.value1()!!) to it.value2()!! }
 
-    protected fun List<Pair<PaymentPurpose, Long>>.balance(purpose: PaymentPurpose): Long =
-        filter { it.first == purpose }.sumOf { it.second }
+    protected fun List<Pair<PaymentPurpose, BigDecimal>>.balance(purpose: PaymentPurpose): BigDecimal =
+        filter { it.first == purpose }.fold(money("0")) { total, entry -> total + entry.second }
 
     protected data class DatabaseSnapshot(
         val payments: List<List<Any?>>,

@@ -115,11 +115,13 @@ components:
       examples: [ EUR ]
 
     Amount:
-      description: Money amount
-      type: integer
-      format: int64
-      minimum: 1
-      examples: [ 10000 ]
+      description: Money in major currency units. EUR accepts at most two decimal places.
+      type: number
+      format: decimal
+      minimum: 0.01
+      maximum: 999999999999999.99
+      multipleOf: 0.01
+      examples: [ 100.00 ]
 
     BillingAddress:
       description: Customer billing address as collected by PSP. Tax evidence, wins on conflict.

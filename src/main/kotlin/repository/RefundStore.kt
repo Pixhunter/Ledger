@@ -4,12 +4,13 @@ import org.example.model.LedgerEntry
 import org.example.model.PaymentEntity
 import org.example.model.RefundEntity
 import org.example.model.LedgerWrite
+import java.math.BigDecimal
 
 interface RefundStore {
 
     suspend fun findPayment(pspReference: String): PaymentEntity?
     suspend fun insert(
         refund: RefundEntity,
-        entries: (previousRefundAmounts: List<Long>) -> List<LedgerEntry>,
+        entries: (previousRefundAmounts: List<BigDecimal>) -> List<LedgerEntry>,
     ): LedgerWrite
 }

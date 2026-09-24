@@ -3,6 +3,7 @@ package org.example.api.mapper
 import org.example.api.generated.model.RefundReasonDto
 import org.example.api.generated.model.RefundRequestDto
 import org.example.model.RefundModel
+import org.example.model.Money
 import org.example.model.enums.RefundReason
 import org.example.toInstant
 
@@ -18,13 +19,15 @@ object RefundMapper {
         require(REFERENCE.matches(pspReference)) {
             "pspReference must be 1-64 chars of [A-Za-z0-9_-], was '$pspReference'"
         }
-        require(amount > 0) { "amount must be positive, was $amount" }
+        require(amount.signum() > 0) { "amount must be positive, was $amount" }
+
+        val domainCurrency = currency.toDomain()
 
         return RefundModel(
             refundReference = refundReference,
             pspReference = pspReference,
-            amount = amount,
-            currency = currency.toDomain(),
+            amount = Money.amount(amount, domainCurrency),
+            currency = domainCurrency,
             success = success,
             reason = (reason ?: RefundReasonDto.OTHER).toDomain(),
             refundedAt = refundedAt.toInstant("refundedAt"),

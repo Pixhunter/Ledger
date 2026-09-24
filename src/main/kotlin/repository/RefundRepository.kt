@@ -21,6 +21,7 @@ import org.jooq.DSLContext
 import org.jooq.impl.DSL
 import org.slf4j.LoggerFactory
 import java.util.UUID
+import java.math.BigDecimal
 
 class RefundRepository(private val dsl: DSLContext) : RefundStore {
 
@@ -54,7 +55,7 @@ class RefundRepository(private val dsl: DSLContext) : RefundStore {
 
     override suspend fun insert(
         refund: RefundEntity,
-        entries: (previousRefundAmounts: List<Long>) -> List<LedgerEntry>,
+        entries: (previousRefundAmounts: List<BigDecimal>) -> List<LedgerEntry>,
     ): LedgerWrite = io {
         dsl.transactionResult { cfg ->
             val db = DSL.using(cfg)
@@ -98,12 +99,12 @@ class RefundRepository(private val dsl: DSLContext) : RefundStore {
                 .and(REFUND.ID.ne(refund.id))
                 .fetch(REFUND.AMOUNT)
                 .filterNotNull()
-            val refundedSoFar = previousRefundAmounts.sum() + refund.amount
+            val refundedSoFar = previousRefundAmounts.fold(BigDecimal.ZERO, BigDecimal::add) + refund.amount
             val ledgerEntries = entries(previousRefundAmounts)
 
             ledgerEntries.groupBy { it.currency }.forEach { (currency, group) ->
-                val sum = group.sumOf { it.amount }
-                require(sum == 0L) { "entries for $currency do not sum to zero: $sum" }
+                val sum = group.fold(BigDecimal.ZERO) { total, entry -> total + entry.amount }
+                require(sum.signum() == 0) { "entries for $currency do not sum to zero: $sum" }
             }
 
             val transactionId = UUID.randomUUID()
@@ -130,7 +131,7 @@ class RefundRepository(private val dsl: DSLContext) : RefundStore {
             lines.execute()
 
             val status =
-                if (refundedSoFar >= gross) PaymentStatus.REFUNDED
+                if (refundedSoFar.compareTo(gross) >= 0) PaymentStatus.REFUNDED
                 else PaymentStatus.PARTIALLY_REFUNDED
 
             db.update(PAYMENT)
@@ -140,7 +141,7 @@ class RefundRepository(private val dsl: DSLContext) : RefundStore {
 
             log.info("stored refund {} as {}", refund.refundReference, status)
 
-            if (refundedSoFar > gross) {
+            if (refundedSoFar.compareTo(gross) > 0) {
                 LedgerWrite.RecordedOverRefund(status, refundedSoFar, gross)
             } else {
                 LedgerWrite.Inserted(status)
@@ -148,7 +149,7 @@ class RefundRepository(private val dsl: DSLContext) : RefundStore {
         }
     }
 
-    private fun paymentGross(db: DSLContext, paymentId: UUID): Long =
+    private fun paymentGross(db: DSLContext, paymentId: UUID): BigDecimal =
         db.select(PAYMENT.GROSS)
             .from(PAYMENT)
             .where(PAYMENT.ID.eq(paymentId))

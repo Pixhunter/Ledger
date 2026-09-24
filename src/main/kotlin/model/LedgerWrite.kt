@@ -1,6 +1,7 @@
 package org.example.model
 
 import org.example.model.enums.PaymentStatus
+import java.math.BigDecimal
 
 sealed interface LedgerWrite {
 
@@ -12,7 +13,7 @@ sealed interface LedgerWrite {
 
     data class RecordedOverRefund(
         val paymentStatus: PaymentStatus,
-        val refundedSoFar: Long,
-        val gross: Long,
+        val refundedSoFar: BigDecimal,
+        val gross: BigDecimal,
     ) : LedgerWrite
 }

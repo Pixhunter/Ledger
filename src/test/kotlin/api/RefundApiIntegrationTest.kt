@@ -15,6 +15,7 @@ import org.example.model.enums.LedgerTransactionType
 import org.example.model.enums.PaymentPurpose
 import org.example.model.enums.PaymentStatus
 import org.example.model.enums.RefundReason
+import org.example.support.money
 import java.util.UUID
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -30,27 +31,27 @@ class RefundApiIntegrationTest : LedgerApiIntegrationTestSupport() {
         val payment = dsl.selectFrom(PAYMENT).fetchSingle()
         assertEquals(pspReference, payment.pspReference)
         assertEquals(merchantId, payment.merchantId)
-        assertEquals(12_100, payment.gross)
-        assertEquals(2_100, payment.tax)
-        assertEquals(500, payment.fee)
-        assertEquals(9_500, payment.merchantNet)
+        assertEquals(money("121.00"), payment.gross)
+        assertEquals(money("21.00"), payment.tax)
+        assertEquals(money("5.00"), payment.fee)
+        assertEquals(money("95.00"), payment.merchantNet)
         assertEquals("ES", payment.taxCountry)
         assertEquals(PaymentStatus.POSTED, enumById<PaymentStatus>(payment.status))
 
         val ledgerEntries = entries()
         assertEquals(1, dsl.fetchCount(LEDGER_TRANSACTION))
         assertEquals(4, dsl.fetchCount(LEDGER_ENTRY))
-        assertEquals(12_100, ledgerEntries.balance(PaymentPurpose.PSP))
-        assertEquals(-2_100, ledgerEntries.balance(PaymentPurpose.TAX))
-        assertEquals(-500, ledgerEntries.balance(PaymentPurpose.REVENUE))
-        assertEquals(-9_500, ledgerEntries.balance(PaymentPurpose.MERCHANT))
+        assertEquals(money("121.00"), ledgerEntries.balance(PaymentPurpose.PSP))
+        assertEquals(money("-21.00"), ledgerEntries.balance(PaymentPurpose.TAX))
+        assertEquals(money("-5.00"), ledgerEntries.balance(PaymentPurpose.REVENUE))
+        assertEquals(money("-95.00"), ledgerEntries.balance(PaymentPurpose.MERCHANT))
 
         assertEquals(HttpStatusCode.OK, send(PAYMENT_REFUND_ENDPOINT, refundBody()).status)
 
         val refund = dsl.selectFrom(REFUND).fetchSingle()
         assertEquals(refundReference, refund.refundReference)
         assertEquals(payment.id, refund.paymentId)
-        assertEquals(12_100, refund.amount)
+        assertEquals(money("121.00"), refund.amount)
         assertEquals(false, refund.feeReturned)
 
         assertEquals(1, dsl.fetchCount(PAYMENT))
@@ -72,11 +73,11 @@ class RefundApiIntegrationTest : LedgerApiIntegrationTestSupport() {
         )
 
         val ledgerEntriesAfterRefund = entries()
-        assertEquals(0, ledgerEntriesAfterRefund.balance(PaymentPurpose.PSP))
-        assertEquals(0, ledgerEntriesAfterRefund.balance(PaymentPurpose.TAX))
-        assertEquals(0, ledgerEntriesAfterRefund.sumOf { it.second })
-        assertEquals(-500, ledgerEntriesAfterRefund.balance(PaymentPurpose.REVENUE))
-        assertEquals(500, ledgerEntriesAfterRefund.balance(PaymentPurpose.MERCHANT))
+        assertEquals(money("0.00"), ledgerEntriesAfterRefund.balance(PaymentPurpose.PSP))
+        assertEquals(money("0.00"), ledgerEntriesAfterRefund.balance(PaymentPurpose.TAX))
+        assertEquals(money("0.00"), ledgerEntriesAfterRefund.sumOf { it.second })
+        assertEquals(money("-5.00"), ledgerEntriesAfterRefund.balance(PaymentPurpose.REVENUE))
+        assertEquals(money("5.00"), ledgerEntriesAfterRefund.balance(PaymentPurpose.MERCHANT))
     }
 
     @Test
@@ -117,11 +118,11 @@ class RefundApiIntegrationTest : LedgerApiIntegrationTestSupport() {
         assertEquals(1, transactionTypes.count { it == LedgerTransactionType.REFUND })
 
         val ledgerEntries = entries()
-        assertEquals(0, ledgerEntries.balance(PaymentPurpose.PSP))
-        assertEquals(0, ledgerEntries.balance(PaymentPurpose.TAX))
-        assertEquals(-500, ledgerEntries.balance(PaymentPurpose.REVENUE))
-        assertEquals(500, ledgerEntries.balance(PaymentPurpose.MERCHANT))
-        assertEquals(0, ledgerEntries.sumOf { it.second })
+        assertEquals(money("0.00"), ledgerEntries.balance(PaymentPurpose.PSP))
+        assertEquals(money("0.00"), ledgerEntries.balance(PaymentPurpose.TAX))
+        assertEquals(money("-5.00"), ledgerEntries.balance(PaymentPurpose.REVENUE))
+        assertEquals(money("5.00"), ledgerEntries.balance(PaymentPurpose.MERCHANT))
+        assertEquals(money("0.00"), ledgerEntries.sumOf { it.second })
     }
 
     @Test
@@ -153,11 +154,11 @@ class RefundApiIntegrationTest : LedgerApiIntegrationTestSupport() {
         assertEquals(PaymentStatus.REFUNDED, enumById(dsl.selectFrom(PAYMENT).fetchSingle().status))
 
         val ledgerEntries = entries()
-        assertEquals(0, ledgerEntries.balance(PaymentPurpose.PSP))
-        assertEquals(0, ledgerEntries.balance(PaymentPurpose.TAX))
-        assertEquals(-500, ledgerEntries.balance(PaymentPurpose.REVENUE))
-        assertEquals(500, ledgerEntries.balance(PaymentPurpose.MERCHANT))
-        assertEquals(0, ledgerEntries.sumOf { it.second })
+        assertEquals(money("0.00"), ledgerEntries.balance(PaymentPurpose.PSP))
+        assertEquals(money("0.00"), ledgerEntries.balance(PaymentPurpose.TAX))
+        assertEquals(money("-5.00"), ledgerEntries.balance(PaymentPurpose.REVENUE))
+        assertEquals(money("5.00"), ledgerEntries.balance(PaymentPurpose.MERCHANT))
+        assertEquals(money("0.00"), ledgerEntries.sumOf { it.second })
     }
 
     @Test
@@ -167,23 +168,23 @@ class RefundApiIntegrationTest : LedgerApiIntegrationTestSupport() {
         assertEquals(HttpStatusCode.OK, send(PAYMENT_CAPTURE_ENDPOINT, paymentBody()).status)
         assertEquals(
             HttpStatusCode.OK,
-            send(PAYMENT_REFUND_ENDPOINT, refundBody(amount = 6_050)).status,
+            send(PAYMENT_REFUND_ENDPOINT, refundBody(amount = money("60.50"))).status,
         )
 
         val payment = dsl.selectFrom(PAYMENT).fetchSingle()
         val refund = dsl.selectFrom(REFUND).fetchSingle()
         assertEquals(PaymentStatus.PARTIALLY_REFUNDED, enumById<PaymentStatus>(payment.status))
-        assertEquals(6_050, refund.amount)
+        assertEquals(money("60.50"), refund.amount)
         assertEquals(1, dsl.fetchCount(REFUND))
         assertEquals(2, dsl.fetchCount(LEDGER_TRANSACTION))
         assertEquals(7, dsl.fetchCount(LEDGER_ENTRY))
 
         val ledgerEntries = entries()
-        assertEquals(6_050, ledgerEntries.balance(PaymentPurpose.PSP))
-        assertEquals(-1_050, ledgerEntries.balance(PaymentPurpose.TAX))
-        assertEquals(-500, ledgerEntries.balance(PaymentPurpose.REVENUE))
-        assertEquals(-4_500, ledgerEntries.balance(PaymentPurpose.MERCHANT))
-        assertEquals(0, ledgerEntries.sumOf { it.second })
+        assertEquals(money("60.50"), ledgerEntries.balance(PaymentPurpose.PSP))
+        assertEquals(money("-10.50"), ledgerEntries.balance(PaymentPurpose.TAX))
+        assertEquals(money("-5.00"), ledgerEntries.balance(PaymentPurpose.REVENUE))
+        assertEquals(money("-45.00"), ledgerEntries.balance(PaymentPurpose.MERCHANT))
+        assertEquals(money("0.00"), ledgerEntries.sumOf { it.second })
     }
 
     @Test
@@ -200,7 +201,7 @@ class RefundApiIntegrationTest : LedgerApiIntegrationTestSupport() {
             HttpStatusCode.OK,
             send(
                 PAYMENT_REFUND_ENDPOINT,
-                refundBody(refundReference = firstReference, amount = 4_000, reason = "DUPLICATE"),
+                refundBody(refundReference = firstReference, amount = money("40.00"), reason = "DUPLICATE"),
             ).status,
         )
         assertEquals(
@@ -212,7 +213,7 @@ class RefundApiIntegrationTest : LedgerApiIntegrationTestSupport() {
             HttpStatusCode.OK,
             send(
                 PAYMENT_REFUND_ENDPOINT,
-                refundBody(refundReference = secondReference, amount = 4_000, reason = "DUPLICATE"),
+                refundBody(refundReference = secondReference, amount = money("40.00"), reason = "DUPLICATE"),
             ).status,
         )
         assertEquals(
@@ -224,7 +225,7 @@ class RefundApiIntegrationTest : LedgerApiIntegrationTestSupport() {
             HttpStatusCode.OK,
             send(
                 PAYMENT_REFUND_ENDPOINT,
-                refundBody(refundReference = finalReference, amount = 4_100, reason = "DUPLICATE"),
+                refundBody(refundReference = finalReference, amount = money("41.00"), reason = "DUPLICATE"),
             ).status,
         )
 
@@ -235,11 +236,11 @@ class RefundApiIntegrationTest : LedgerApiIntegrationTestSupport() {
         assertEquals(true, dsl.selectFrom(REFUND).fetch().all { it.feeReturned })
 
         val ledgerEntries = entries()
-        assertEquals(0, ledgerEntries.balance(PaymentPurpose.PSP))
-        assertEquals(0, ledgerEntries.balance(PaymentPurpose.TAX))
-        assertEquals(0, ledgerEntries.balance(PaymentPurpose.REVENUE))
-        assertEquals(0, ledgerEntries.balance(PaymentPurpose.MERCHANT))
-        assertEquals(0, ledgerEntries.sumOf { it.second })
+        assertEquals(money("0.00"), ledgerEntries.balance(PaymentPurpose.PSP))
+        assertEquals(money("0.00"), ledgerEntries.balance(PaymentPurpose.TAX))
+        assertEquals(money("0.00"), ledgerEntries.balance(PaymentPurpose.REVENUE))
+        assertEquals(money("0.00"), ledgerEntries.balance(PaymentPurpose.MERCHANT))
+        assertEquals(money("0.00"), ledgerEntries.sumOf { it.second })
     }
 
     @Test
@@ -273,10 +274,10 @@ class RefundApiIntegrationTest : LedgerApiIntegrationTestSupport() {
         assertEquals(true, refund.feeReturned)
 
         val ledgerEntries = entries()
-        assertEquals(0, ledgerEntries.balance(PaymentPurpose.PSP))
-        assertEquals(0, ledgerEntries.balance(PaymentPurpose.TAX))
-        assertEquals(0, ledgerEntries.balance(PaymentPurpose.REVENUE))
-        assertEquals(0, ledgerEntries.balance(PaymentPurpose.MERCHANT))
+        assertEquals(money("0.00"), ledgerEntries.balance(PaymentPurpose.PSP))
+        assertEquals(money("0.00"), ledgerEntries.balance(PaymentPurpose.TAX))
+        assertEquals(money("0.00"), ledgerEntries.balance(PaymentPurpose.REVENUE))
+        assertEquals(money("0.00"), ledgerEntries.balance(PaymentPurpose.MERCHANT))
     }
 
     @Test
@@ -292,7 +293,7 @@ class RefundApiIntegrationTest : LedgerApiIntegrationTestSupport() {
         val refund = dsl.selectFrom(REFUND).fetchSingle()
         assertEquals(RefundReason.OTHER, enumById<RefundReason>(refund.reason))
         assertEquals(false, refund.feeReturned)
-        assertEquals(-500, entries().balance(PaymentPurpose.REVENUE))
+        assertEquals(money("-5.00"), entries().balance(PaymentPurpose.REVENUE))
     }
 
     @Test
@@ -308,7 +309,7 @@ class RefundApiIntegrationTest : LedgerApiIntegrationTestSupport() {
         val refund = dsl.selectFrom(REFUND).fetchSingle()
         assertEquals(RefundReason.PRODUCT_ISSUE, enumById<RefundReason>(refund.reason))
         assertEquals(false, refund.feeReturned)
-        assertEquals(-500, entries().balance(PaymentPurpose.REVENUE))
+        assertEquals(money("-5.00"), entries().balance(PaymentPurpose.REVENUE))
     }
 
     @Test
@@ -333,9 +334,9 @@ class RefundApiIntegrationTest : LedgerApiIntegrationTestSupport() {
         assertEquals(HoldReason.TAX_UNRESOLVED, enumById<HoldReason>(refundedPayment.holdReason!!))
 
         val ledgerEntries = entries()
-        assertEquals(0, ledgerEntries.balance(PaymentPurpose.PSP))
-        assertEquals(0, ledgerEntries.balance(PaymentPurpose.HELD))
-        assertEquals(0, ledgerEntries.sumOf { it.second })
+        assertEquals(money("0.00"), ledgerEntries.balance(PaymentPurpose.PSP))
+        assertEquals(money("0.00"), ledgerEntries.balance(PaymentPurpose.HELD))
+        assertEquals(money("0.00"), ledgerEntries.sumOf { it.second })
     }
 
     @Test
@@ -355,5 +356,18 @@ class RefundApiIntegrationTest : LedgerApiIntegrationTestSupport() {
         )
 
         assertEquals(databaseBeforeCall, databaseSnapshot())
+    }
+
+    @Test
+    fun `refund amount with fractions of a cent is rejected`() = testApplication {
+        application { ledgerModule(AppConfig(), dsl) }
+        assertEquals(HttpStatusCode.OK, send(PAYMENT_CAPTURE_ENDPOINT, paymentBody()).status)
+        val databaseBeforeRefund = databaseSnapshot()
+
+        assertEquals(
+            HttpStatusCode.BadRequest,
+            send(PAYMENT_REFUND_ENDPOINT, refundBody(amount = money("1.001"))).status,
+        )
+        assertEquals(databaseBeforeRefund, databaseSnapshot())
     }
 }

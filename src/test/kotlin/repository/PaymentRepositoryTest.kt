@@ -15,6 +15,8 @@ import org.example.model.enums.PaymentPurpose
 import org.example.model.enums.PaymentStatus
 import org.example.model.enums.TaxCategory
 import org.example.support.PostgresTest
+import org.example.support.money
+import java.math.BigDecimal
 import java.time.Instant
 import java.util.UUID
 import kotlin.test.Test
@@ -41,10 +43,10 @@ class PaymentRepositoryTest : PostgresTest() {
         assertEquals(payment.id, row.id)
         assertEquals("psp-1", row.pspReference)
         assertEquals(merchantId, row.merchantId)
-        assertEquals(12_100, row.gross)
-        assertEquals(2_100, row.tax)
-        assertEquals(300, row.fee)
-        assertEquals(9_700, row.merchantNet)
+        assertEquals(money("121.00"), row.gross)
+        assertEquals(money("21.00"), row.tax)
+        assertEquals(money("3.00"), row.fee)
+        assertEquals(money("97.00"), row.merchantNet)
         assertEquals("EUR", row.currency)
         assertEquals("ES", row.taxCountry)
         assertEquals(2_100, row.taxRateBps)
@@ -58,11 +60,11 @@ class PaymentRepositoryTest : PostgresTest() {
         assertEquals(LedgerTransactionType.CAPTURE, enumById<LedgerTransactionType>(transaction.type))
 
         assertEquals(4, storedEntries().size)
-        assertEquals(0, storedEntries().sumOf { it.second })
-        assertEquals(12_100, amountFor(PaymentPurpose.PSP))
-        assertEquals(-2_100, amountFor(PaymentPurpose.TAX))
-        assertEquals(-300, amountFor(PaymentPurpose.REVENUE))
-        assertEquals(-9_700, amountFor(PaymentPurpose.MERCHANT))
+        assertEquals(money("0"), storedEntries().sumOf { it.second })
+        assertEquals(money("121.00"), amountFor(PaymentPurpose.PSP))
+        assertEquals(money("-21.00"), amountFor(PaymentPurpose.TAX))
+        assertEquals(money("-3.00"), amountFor(PaymentPurpose.REVENUE))
+        assertEquals(money("-97.00"), amountFor(PaymentPurpose.MERCHANT))
     }
 
     @Test
@@ -115,23 +117,23 @@ class PaymentRepositoryTest : PostgresTest() {
         assertEquals(0, dsl.fetchCount(LEDGER_ENTRY))
     }
 
-    private fun storedEntries(): List<Pair<PaymentPurpose, Long>> =
+    private fun storedEntries(): List<Pair<PaymentPurpose, BigDecimal>> =
         dsl.select(LEDGER_ENTRY.PURPOSE, LEDGER_ENTRY.AMOUNT)
             .from(LEDGER_ENTRY)
             .fetch()
             .map { enumById<PaymentPurpose>(it.value1()!!) to it.value2()!! }
 
-    private fun amountFor(purpose: PaymentPurpose): Long =
+    private fun amountFor(purpose: PaymentPurpose): BigDecimal =
         storedEntries().filter { it.first == purpose }.sumOf { it.second }
 
     private fun posted(id: UUID = UUID.randomUUID()) = PaymentEntity(
         id = id,
         pspReference = "psp-1",
         merchantId = merchantId,
-        gross = 12_100,
-        tax = 2_100,
-        fee = 300,
-        merchantNet = 9_700,
+        gross = money("121.00"),
+        tax = money("21.00"),
+        fee = money("3.00"),
+        merchantNet = money("97.00"),
         currency = Currency.EUR,
         taxCountry = "ES",
         taxCategory = TaxCategory.STANDARD,

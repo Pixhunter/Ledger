@@ -29,7 +29,7 @@ paths:
             example:
               pspReference: '8835116497253962'
               merchantId: 5f1d9e02-3ab7-4c88-b0e5-6d427fa1c93b
-              amount: 11900
+              amount: 119.00
               currency: EUR
               billingAddress:
                 country: DE
@@ -73,7 +73,7 @@ paths:
             example:
               refundReference: '9915116497253970'
               pspReference: '8835116497253962'
-              amount: 5000
+              amount: 50.00
               currency: EUR
               success: true
               reason: CUSTOMER_REQUEST

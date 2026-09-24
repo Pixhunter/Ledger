@@ -12,6 +12,8 @@ import org.example.model.enums.PaymentStatus
 import org.example.repository.PaymentStore
 import org.example.tax.BasisPoints
 import org.example.tax.TaxRates
+import org.example.support.money
+import java.math.BigDecimal
 import java.time.Instant
 import java.util.UUID
 import kotlin.test.Test
@@ -33,9 +35,9 @@ class PaymentServiceTest {
         val payment = store.single()
         assertEquals(PaymentStatus.POSTED, payment.status)
         assertNull(payment.holdReason)
-        assertEquals(2_100, payment.tax)
-        assertEquals(300, payment.fee)
-        assertEquals(9_700, payment.merchantNet)
+        assertEquals(money("21.00"), payment.tax)
+        assertEquals(money("3.00"), payment.fee)
+        assertEquals(money("97.00"), payment.merchantNet)
         assertEquals("ES", payment.taxCountry)
         assertEquals(2_100, payment.taxRateBps)
     }
@@ -46,11 +48,11 @@ class PaymentServiceTest {
 
         run(store, request())
 
-        assertEquals(0, store.entries.sumOf { it.amount })
-        assertEquals(12_100, store.amountFor(PaymentPurpose.PSP))
-        assertEquals(-2_100, store.amountFor(PaymentPurpose.TAX))
-        assertEquals(-300, store.amountFor(PaymentPurpose.REVENUE))
-        assertEquals(-9_700, store.amountFor(PaymentPurpose.MERCHANT))
+        assertEquals(money("0"), store.entries.sumOf { it.amount })
+        assertEquals(money("121.00"), store.amountFor(PaymentPurpose.PSP))
+        assertEquals(money("-21.00"), store.amountFor(PaymentPurpose.TAX))
+        assertEquals(money("-3.00"), store.amountFor(PaymentPurpose.REVENUE))
+        assertEquals(money("-97.00"), store.amountFor(PaymentPurpose.MERCHANT))
     }
 
     @Test
@@ -63,9 +65,9 @@ class PaymentServiceTest {
         val payment = store.single()
         assertEquals(PaymentStatus.HELD, payment.status)
         assertEquals(HoldReason.TAX_UNRESOLVED, payment.holdReason)
-        assertEquals(0, payment.tax)
-        assertEquals(12_100, payment.merchantNet)
-        assertEquals(-12_100, store.amountFor(PaymentPurpose.HELD))
+        assertEquals(money("0"), payment.tax)
+        assertEquals(money("121.00"), payment.merchantNet)
+        assertEquals(money("-121.00"), store.amountFor(PaymentPurpose.HELD))
     }
 
     @Test
@@ -79,8 +81,8 @@ class PaymentServiceTest {
         assertEquals(PaymentStatus.HELD, payment.status)
         assertEquals(HoldReason.UNKNOWN_MERCHANT, payment.holdReason)
         assertEquals(merchantId, payment.merchantId)
-        assertEquals(-9_700, store.amountFor(PaymentPurpose.HELD))
-        assertEquals(-2_100, store.amountFor(PaymentPurpose.TAX))
+        assertEquals(money("-97.00"), store.amountFor(PaymentPurpose.HELD))
+        assertEquals(money("-21.00"), store.amountFor(PaymentPurpose.TAX))
     }
 
     @Test
@@ -91,7 +93,7 @@ class PaymentServiceTest {
 
         val payment = store.single()
         assertTrue(payment.reverseCharge)
-        assertEquals(0, payment.tax)
+        assertEquals(money("0"), payment.tax)
         assertEquals(PaymentStatus.POSTED, payment.status)
     }
 
@@ -119,7 +121,7 @@ class PaymentServiceTest {
     }
 
     private fun request(
-        amount: Long = 12_100,
+        amount: BigDecimal = money("121.00"),
         country: String = "ES",
         vatId: String? = null,
     ) = PaymentModel(
@@ -145,7 +147,7 @@ class PaymentServiceTest {
 
         fun single(): PaymentEntity = writes.single().first
 
-        fun amountFor(purpose: PaymentPurpose): Long =
+        fun amountFor(purpose: PaymentPurpose): BigDecimal =
             entries.filter { it.purpose == purpose }.sumOf { it.amount }
 
         override suspend fun insert(

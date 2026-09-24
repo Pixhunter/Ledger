@@ -78,7 +78,10 @@ Country not in the table: see open decisions.
 ### Computing the split
 
 `amount` from the PSP is **tax-inclusive** (what the customer paid).
-All money is integer minor units.
+API amounts are decimal major units and must match the currency precision
+(EUR: at most 2 decimal places). Kotlin uses `BigDecimal`; PostgreSQL uses
+`numeric(19,4)`. Values are stored at scale 4 and calculated postings are
+rounded to the currency precision with `HALF_EVEN`.
 
 ```
 tax         = round_half_even(gross * rateBps / (10000 + rateBps))
@@ -209,8 +212,8 @@ Review outcome: **release** (moves to available, paid next night) or
 
 ## Database
 
-Table names are singular. Money is always `bigint` in minor units, never
-`decimal` or `float`.
+Table names are singular. Money is always exact `numeric(19,4)`, never binary
+`float` or `double`.
 
 ### Tables overview
 
@@ -257,10 +260,10 @@ erDiagram
     uuid id PK
     text psp_reference UK "idempotency key"
     uuid merchant_id "no FK, unknown = HELD"
-    bigint gross "tax incl, minor units"
-    bigint tax
-    bigint fee "MoR revenue"
-    bigint merchant_net
+    numeric_19_4 gross "tax incl, major units"
+    numeric_19_4 tax
+    numeric_19_4 fee "MoR revenue"
+    numeric_19_4 merchant_net
     text currency
     text tax_country
     smallint tax_category
@@ -283,13 +286,13 @@ erDiagram
     uuid transaction_id FK
     smallint purpose "1 PSP, 2 TAX, 3 REVENUE, 4 MERCHANT, 5 HELD"
     text purpose_key "country or merchant id"
-    bigint amount "signed, sum = 0"
+    numeric_19_4 amount "signed, sum = 0"
     text currency
   }
   PAYOUT {
     uuid merchant_id PK,FK
     date payout_date PK "London business date"
-    bigint amount
+    numeric_19_4 amount
     text currency
     uuid ledger_transaction_id FK
     smallint status "1 COMPUTED, 2 SENT, 3 CONFIRMED"
@@ -419,10 +422,10 @@ payment
   id              uuid          PK
   psp_reference   text          UNIQUE, idempotency key
   merchant_id     uuid          no FK: unknown merchant -> HELD
-  gross           bigint        customer paid, tax included, minor units
-  tax             bigint
-  fee             bigint        MoR revenue
-  merchant_net    bigint
+  gross           numeric(19,4) customer paid, tax included, major units
+  tax             numeric(19,4)
+  fee             numeric(19,4) MoR revenue
+  merchant_net    numeric(19,4)
   currency        text          ISO 4217
   tax_country     text          ISO 3166, result of the vote
   tax_category    smallint      1 STANDARD, 2 REDUCED, from merchant
@@ -508,7 +511,7 @@ ledger_entry                        one line = one change in "whose money"
   purpose         smallint    1 PSP, 2 TAX, 3 REVENUE, 4 MERCHANT, 5 HELD
   purpose_key     text  null  TAX: country, MERCHANT: merchant id,
                               HELD: merchant id or null
-  amount          bigint      signed, + debit / - credit, minor units
+  amount          numeric(19,4) signed, + debit / - credit, major units
   currency        text        ISO 4217
 
   constraints
@@ -577,7 +580,7 @@ stay available for refunds.
 payout
   merchant_id            uuid         PK, FK -> merchant.id
   payout_date            date         PK, business day, Europe/London
-  amount                 bigint       MERCHANT balance at job time
+  amount                 numeric(19,4) MERCHANT balance at job time
   currency               text
   ledger_transaction_id  uuid         FK -> the PAYOUT ledger transaction
   status                 smallint     1 COMPUTED (2 SENT, 3 CONFIRMED later)

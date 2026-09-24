@@ -1,8 +1,8 @@
 package org.example.api.controller
 
 import io.ktor.http.HttpStatusCode
-import kotlinx.serialization.json.Json
 import org.example.api.ApiResponse
+import org.example.api.apiJson
 import org.example.api.generated.model.ErrorReasonDto
 import org.example.api.generated.model.LedgerResponseDto
 import org.example.api.generated.model.PaymentRequestDto
@@ -25,15 +25,13 @@ class LedgerController(
 ) {
     private val log = LoggerFactory.getLogger(LedgerController::class.java)
 
-    private val json = Json { ignoreUnknownKeys = true }
-
     suspend fun createPayment(rawBody: String, signatureHeader: String?): ApiResponse<LedgerResponseDto> {
         if (!signature.verify(rawBody.toByteArray(), signatureHeader)) {
             log.warn("rejected unsigned payment request")
             return failed(HttpStatusCode.Unauthorized)
         }
 
-        val request = parse(rawBody) { json.decodeFromString<PaymentRequestDto>(it).toModel() }
+        val request = parse(rawBody) { apiJson.decodeFromString<PaymentRequestDto>(it).toModel() }
             ?: return failed(HttpStatusCode.BadRequest)
 
         log.info("payment psp={} merchant={}", request.pspReference, request.merchantId)
@@ -47,7 +45,7 @@ class LedgerController(
             return failed(HttpStatusCode.Unauthorized)
         }
 
-        val request = parse(rawBody) { json.decodeFromString<RefundRequestDto>(it).toModel() }
+        val request = parse(rawBody) { apiJson.decodeFromString<RefundRequestDto>(it).toModel() }
             ?: return failed(HttpStatusCode.BadRequest)
 
         log.info("refund psp={} refund={}", request.pspReference, request.refundReference)

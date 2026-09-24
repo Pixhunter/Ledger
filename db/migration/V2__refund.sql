@@ -17,7 +17,7 @@ CREATE TABLE mor.refund
     id               uuid        PRIMARY KEY,
     refund_reference text        NOT NULL,           -- idempotency key, the refund's own PSP id
     payment_id       uuid        NOT NULL REFERENCES mor.payment (id),
-    amount           bigint      NOT NULL,
+    amount           numeric(19,4) NOT NULL,
     currency         text        NOT NULL,
     reason           smallint    NOT NULL,           -- RefundReason: 1 DUPLICATE, 2 FRAUD, 3 CUSTOMER_REQUEST, 4 PRODUCT_ISSUE, 5 OTHER
     fee_returned     boolean     NOT NULL,           -- frozen: did the MoR give its fee back

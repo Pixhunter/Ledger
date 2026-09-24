@@ -42,7 +42,7 @@ CREATE TABLE mor.ledger_entry (
     transaction_id uuid NOT NULL,
     purpose smallint NOT NULL,
     purpose_key text,
-    amount bigint NOT NULL,
+    amount numeric(19,4) NOT NULL,
     currency text NOT NULL,
     CONSTRAINT ledger_entry_amount_ck CHECK ((amount <> 0)),
     CONSTRAINT ledger_entry_currency_ck CHECK ((currency ~ '^[A-Z]{3}$'::text)),
@@ -123,10 +123,10 @@ CREATE TABLE mor.payment (
     id uuid NOT NULL,
     psp_reference text NOT NULL,
     merchant_id uuid,
-    gross bigint NOT NULL,
-    tax bigint NOT NULL,
-    fee bigint NOT NULL,
-    merchant_net bigint NOT NULL,
+    gross numeric(19,4) NOT NULL,
+    tax numeric(19,4) NOT NULL,
+    fee numeric(19,4) NOT NULL,
+    merchant_net numeric(19,4) NOT NULL,
     currency text NOT NULL,
     tax_country text,
     tax_category smallint,
@@ -153,7 +153,7 @@ CREATE TABLE mor.payment (
 CREATE TABLE mor.payout (
     merchant_id uuid NOT NULL,
     payout_date date NOT NULL,
-    amount bigint NOT NULL,
+    amount numeric(19,4) NOT NULL,
     currency text NOT NULL,
     ledger_transaction_id uuid NOT NULL,
     status smallint NOT NULL,
@@ -172,7 +172,7 @@ CREATE TABLE mor.refund (
     id uuid NOT NULL,
     refund_reference text NOT NULL,
     payment_id uuid NOT NULL,
-    amount bigint NOT NULL,
+    amount numeric(19,4) NOT NULL,
     currency text NOT NULL,
     reason smallint NOT NULL,
     fee_returned boolean NOT NULL,
@@ -379,4 +379,3 @@ ALTER TABLE ONLY mor.refund
 --
 
 \unrestrict DLleu7RhzAgxoPb0YmyIWSwpXx3DfURZICE4oFYsD9yUy77YhTHLrA9mirKM1UW
-
