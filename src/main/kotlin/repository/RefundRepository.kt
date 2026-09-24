@@ -60,6 +60,8 @@ class RefundRepository(private val dsl: DSLContext) : RefundStore {
         dsl.transactionResult { cfg ->
             val db = DSL.using(cfg)
 
+            val gross = paymentGrossForUpdate(db, refund.paymentId)
+
             val inserted: UUID? = db
                 .insertInto(REFUND)
                 .set(REFUND.ID, refund.id)
@@ -92,7 +94,6 @@ class RefundRepository(private val dsl: DSLContext) : RefundStore {
                 return@transactionResult LedgerWrite.Duplicate(paymentStatus(db, refund.paymentId))
             }
 
-            val gross = paymentGross(db, refund.paymentId)
             val previousRefundAmounts = db.select(REFUND.AMOUNT)
                 .from(REFUND)
                 .where(REFUND.PAYMENT_ID.eq(refund.paymentId))
@@ -149,10 +150,11 @@ class RefundRepository(private val dsl: DSLContext) : RefundStore {
         }
     }
 
-    private fun paymentGross(db: DSLContext, paymentId: UUID): BigDecimal =
+    private fun paymentGrossForUpdate(db: DSLContext, paymentId: UUID): BigDecimal =
         db.select(PAYMENT.GROSS)
             .from(PAYMENT)
             .where(PAYMENT.ID.eq(paymentId))
+            .forUpdate()
             .fetchOne(PAYMENT.GROSS)
             ?: error("payment $paymentId disappeared inside its own transaction")
 

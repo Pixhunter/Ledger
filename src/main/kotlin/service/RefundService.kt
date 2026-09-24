@@ -76,6 +76,6 @@ class RefundService(
     }
 
     private companion object {
-        val CLOCK_SKEW: Duration = Duration.ofMinutes(5)
+        val CLOCK_SKEW: Duration = Duration.ofDays(60)
     }
 }

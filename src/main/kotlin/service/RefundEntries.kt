@@ -18,17 +18,15 @@ object RefundEntries {
     ): List<LedgerEntry> = buildList {
         val currency = payment.currency
         val previousTotal = previousRefundAmounts.fold(BigDecimal.ZERO, BigDecimal::add)
-        val isFinalRefund = (previousTotal + refund.amount).compareTo(payment.gross) == 0
-        val taxPart = if (isFinalRefund) {
-            payment.tax - previousRefundAmounts.sumOf { share(it, payment.tax, payment.gross, currency) }
-        } else {
-            share(refund.amount, payment.tax, payment.gross, currency)
-        }
-        val feePart = if (isFinalRefund) {
-            payment.fee - previousRefundAmounts.sumOf { share(it, payment.fee, payment.gross, currency) }
-        } else {
-            share(refund.amount, payment.fee, payment.gross, currency)
-        }
+        val refundedTotal = previousTotal + refund.amount
+
+        // Allocate from cumulative totals rather than rounding every refund in
+        // isolation. Tiny refunds may receive no tax at first, but later ones
+        // catch up and a full refund always reverses the complete original tax.
+        val taxPart = cumulativeShare(refundedTotal, payment.tax, payment.gross, currency) -
+            cumulativeShare(previousTotal, payment.tax, payment.gross, currency)
+        val feePart = cumulativeShare(refundedTotal, payment.fee, payment.gross, currency) -
+            cumulativeShare(previousTotal, payment.fee, payment.gross, currency)
 
         val revenuePart = if (refund.feeReturned) feePart else Money.ZERO
         val merchantPart = refund.amount - taxPart - revenuePart
@@ -55,15 +53,17 @@ object RefundEntries {
         }
     }
 
-    private fun share(
-        amount: BigDecimal,
+    private fun cumulativeShare(
+        refundedTotal: BigDecimal,
         part: BigDecimal,
         gross: BigDecimal,
         currency: org.example.model.enums.Currency,
-    ): BigDecimal =
-        Money.calculated(
-            amount.multiply(part)
+    ): BigDecimal {
+        val cappedTotal = if (refundedTotal.compareTo(gross) > 0) gross else refundedTotal
+        return Money.calculated(
+            cappedTotal.multiply(part)
                 .divide(gross, Money.STORAGE_SCALE + 8, RoundingMode.HALF_EVEN),
             currency,
         )
+    }
 }

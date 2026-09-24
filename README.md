@@ -6,6 +6,9 @@ tax authorities and what we owe merchants.
 **To build and run it, see [README_RUN.md](README_RUN.md).** This file is the
 design: tax rules, schema, trade-offs and limits.
 
+**For a short interviewer-facing view with rendered diagrams, see
+[BUSINESS_RULES.md](BUSINESS_RULES.md).**
+
 > Sections are added as the design is agreed.
 
 ## Scope

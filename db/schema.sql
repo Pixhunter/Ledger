@@ -5,7 +5,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict DLleu7RhzAgxoPb0YmyIWSwpXx3DfURZICE4oFYsD9yUy77YhTHLrA9mirKM1UW
+\restrict 3JpgEJAHcw7pw7Fdq5HSx7dxxc9ZhMszWA1rn3sAiVAFxrtlOJH0b5QYs8ik6Id
 
 -- Dumped from database version 17.11
 -- Dumped by pg_dump version 17.11
@@ -44,7 +44,7 @@ CREATE TABLE mor.ledger_entry (
     purpose_key text,
     amount numeric(19,4) NOT NULL,
     currency text NOT NULL,
-    CONSTRAINT ledger_entry_amount_ck CHECK ((amount <> 0)),
+    CONSTRAINT ledger_entry_amount_ck CHECK ((amount <> (0)::numeric)),
     CONSTRAINT ledger_entry_currency_ck CHECK ((currency ~ '^[A-Z]{3}$'::text)),
     CONSTRAINT ledger_entry_purpose_ck CHECK ((purpose = ANY (ARRAY[1, 2, 3, 4, 5])))
 );
@@ -137,7 +137,7 @@ CREATE TABLE mor.payment (
     hold_reason smallint,
     payment_time timestamp with time zone NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT payment_amounts_ck CHECK (((gross > 0) AND (tax >= 0) AND (fee >= 0) AND (merchant_net >= 0))),
+    CONSTRAINT payment_amounts_ck CHECK (((gross > (0)::numeric) AND (tax >= (0)::numeric) AND (fee >= (0)::numeric) AND (merchant_net >= (0)::numeric))),
     CONSTRAINT payment_country_ck CHECK (((tax_country IS NULL) OR (tax_country ~ '^[A-Z]{2}$'::text))),
     CONSTRAINT payment_currency_ck CHECK ((currency ~ '^[A-Z]{3}$'::text)),
     CONSTRAINT payment_hold_ck CHECK (((status <> 2) OR (hold_reason IS NOT NULL))),
@@ -158,7 +158,7 @@ CREATE TABLE mor.payout (
     ledger_transaction_id uuid NOT NULL,
     status smallint NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT payout_amount_ck CHECK ((amount > 0)),
+    CONSTRAINT payout_amount_ck CHECK ((amount > (0)::numeric)),
     CONSTRAINT payout_currency_ck CHECK ((currency ~ '^[A-Z]{3}$'::text)),
     CONSTRAINT payout_status_ck CHECK ((status = ANY (ARRAY[1, 2, 3])))
 );
@@ -178,7 +178,7 @@ CREATE TABLE mor.refund (
     fee_returned boolean NOT NULL,
     refunded_at timestamp with time zone NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT refund_amount_ck CHECK ((amount > 0)),
+    CONSTRAINT refund_amount_ck CHECK ((amount > (0)::numeric)),
     CONSTRAINT refund_currency_ck CHECK ((currency ~ '^[A-Z]{3}$'::text)),
     CONSTRAINT refund_reason_ck CHECK ((reason = ANY (ARRAY[1, 2, 3, 4, 5])))
 );
@@ -378,4 +378,4 @@ ALTER TABLE ONLY mor.refund
 -- PostgreSQL database dump complete
 --
 
-\unrestrict DLleu7RhzAgxoPb0YmyIWSwpXx3DfURZICE4oFYsD9yUy77YhTHLrA9mirKM1UW
+\unrestrict 3JpgEJAHcw7pw7Fdq5HSx7dxxc9ZhMszWA1rn3sAiVAFxrtlOJH0b5QYs8ik6Id

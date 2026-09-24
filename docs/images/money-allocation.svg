@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="610" viewBox="0 0 1200 610" role="img" aria-labelledby="title desc">
+  <title id="title">Payment and partial refund allocation</title>
+  <desc id="desc">A 100 euro payment is split into tax, MoR revenue and merchant value, followed by two possible policies for a 20 euro refund.</desc>
+  <defs>
+    <marker id="arrow2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#4f5965"/>
+    </marker>
+    <filter id="shadow2" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#17212b" flood-opacity="0.14"/>
+    </filter>
+    <style>
+      .title { font: 700 28px Inter, Arial, sans-serif; fill: #17212b; }
+      .heading { font: 700 18px Inter, Arial, sans-serif; fill: #17212b; }
+      .money { font: 700 21px Inter, Arial, sans-serif; fill: #17212b; }
+      .text { font: 14px Inter, Arial, sans-serif; fill: #33404d; }
+      .small { font: 13px Inter, Arial, sans-serif; fill: #526171; }
+      .arrow { stroke: #4f5965; stroke-width: 2; fill: none; marker-end: url(#arrow2); }
+    </style>
+  </defs>
+  <rect width="1200" height="610" fill="#fbfaf7"/>
+  <text x="50" y="50" class="title">€100 payment and €20 partial-refund example</text>
+
+  <rect x="52" y="88" width="190" height="100" rx="14" fill="#eaf3ff" stroke="#79aee0" filter="url(#shadow2)"/>
+  <text x="147" y="124" text-anchor="middle" class="heading">Customer paid</text>
+  <text x="147" y="157" text-anchor="middle" class="money">€100.00</text>
+  <path d="M242 138 H302" class="arrow"/>
+
+  <rect x="304" y="83" width="250" height="110" rx="14" fill="#fff5db" stroke="#d7a93f" filter="url(#shadow2)"/>
+  <text x="429" y="117" text-anchor="middle" class="heading">Tax liability</text>
+  <text x="429" y="148" text-anchor="middle" class="money">€17.36</text>
+  <text x="429" y="173" text-anchor="middle" class="small">€100 × 21 / 121</text>
+  <rect x="584" y="83" width="250" height="110" rx="14" fill="#f1eafe" stroke="#a286d9" filter="url(#shadow2)"/>
+  <text x="709" y="117" text-anchor="middle" class="heading">MoR revenue</text>
+  <text x="709" y="148" text-anchor="middle" class="money">€15.00</text>
+  <text x="709" y="173" text-anchor="middle" class="small">refund policy applies</text>
+  <rect x="864" y="83" width="284" height="110" rx="14" fill="#e8f7ee" stroke="#70ae84" filter="url(#shadow2)"/>
+  <text x="1006" y="117" text-anchor="middle" class="heading">Merchant payable</text>
+  <text x="1006" y="148" text-anchor="middle" class="money">€67.64</text>
+  <text x="1006" y="173" text-anchor="middle" class="small">remainder guarantees exact split</text>
+  <path d="M554 138 H582" class="arrow"/>
+  <path d="M834 138 H862" class="arrow"/>
+
+  <path d="M600 218 V254" class="arrow"/>
+  <rect x="455" y="256" width="290" height="78" rx="14" fill="#ffffff" stroke="#7d8994" filter="url(#shadow2)"/>
+  <text x="600" y="286" text-anchor="middle" class="heading">PSP reports €20 refund</text>
+  <text x="600" y="311" text-anchor="middle" class="small">tax returned cumulatively: €3.47</text>
+
+  <path d="M520 334 C430 370 328 366 288 402" class="arrow"/>
+  <path d="M680 334 C770 370 872 366 912 402" class="arrow"/>
+
+  <rect x="52" y="404" width="520" height="152" rx="18" fill="#fff8e8" stroke="#d9b65f"/>
+  <text x="78" y="438" class="heading">POLICY A — retain MoR revenue</text>
+  <text x="78" y="471" class="text">Customer receives</text><text x="535" y="471" text-anchor="end" class="money">€20.00</text>
+  <text x="78" y="500" class="text">Tax reversed</text><text x="535" y="500" text-anchor="end" class="money">€3.47</text>
+  <text x="78" y="529" class="text">Revenue reversed</text><text x="535" y="529" text-anchor="end" class="money">€0.00</text>
+  <text x="300" y="581" text-anchor="middle" class="small">Merchant funds €16.53 · MoR keeps €15.00 revenue</text>
+
+  <rect x="628" y="404" width="520" height="152" rx="18" fill="#edf8f1" stroke="#78b68c"/>
+  <text x="654" y="438" class="heading">POLICY B — return revenue proportionally</text>
+  <text x="654" y="471" class="text">Customer receives</text><text x="1111" y="471" text-anchor="end" class="money">€20.00</text>
+  <text x="654" y="500" class="text">Tax reversed</text><text x="1111" y="500" text-anchor="end" class="money">€3.47</text>
+  <text x="654" y="529" class="text">Revenue reversed</text><text x="1111" y="529" text-anchor="end" class="money">€3.00</text>
+  <text x="888" y="581" text-anchor="middle" class="small">Merchant funds €13.53 · MoR revenue remaining €12.00</text>
+</svg>
