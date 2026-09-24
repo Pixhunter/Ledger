@@ -5,7 +5,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict 9Yyew7N60zWBbg9QEC5Z0d7odGdYtdW0vwoigqUst8DgQCh55nq9bg83AvEjs1F
+\restrict DLleu7RhzAgxoPb0YmyIWSwpXx3DfURZICE4oFYsD9yUy77YhTHLrA9mirKM1UW
 
 -- Dumped from database version 17.11
 -- Dumped by pg_dump version 17.11
@@ -140,9 +140,9 @@ CREATE TABLE mor.payment (
     CONSTRAINT payment_amounts_ck CHECK (((gross > 0) AND (tax >= 0) AND (fee >= 0) AND (merchant_net >= 0))),
     CONSTRAINT payment_country_ck CHECK (((tax_country IS NULL) OR (tax_country ~ '^[A-Z]{2}$'::text))),
     CONSTRAINT payment_currency_ck CHECK ((currency ~ '^[A-Z]{3}$'::text)),
-    CONSTRAINT payment_hold_ck CHECK (((status = 2) = (hold_reason IS NOT NULL))),
+    CONSTRAINT payment_hold_ck CHECK (((status <> 2) OR (hold_reason IS NOT NULL))),
     CONSTRAINT payment_split_ck CHECK ((gross = ((tax + fee) + merchant_net))),
-    CONSTRAINT payment_status_ck CHECK ((status = ANY (ARRAY[1, 2, 3])))
+    CONSTRAINT payment_status_ck CHECK ((status = ANY (ARRAY[1, 2, 3, 4, 5])))
 );
 
 
@@ -161,6 +161,26 @@ CREATE TABLE mor.payout (
     CONSTRAINT payout_amount_ck CHECK ((amount > 0)),
     CONSTRAINT payout_currency_ck CHECK ((currency ~ '^[A-Z]{3}$'::text)),
     CONSTRAINT payout_status_ck CHECK ((status = ANY (ARRAY[1, 2, 3])))
+);
+
+
+--
+-- Name: refund; Type: TABLE; Schema: mor; Owner: -
+--
+
+CREATE TABLE mor.refund (
+    id uuid NOT NULL,
+    refund_reference text NOT NULL,
+    payment_id uuid NOT NULL,
+    amount bigint NOT NULL,
+    currency text NOT NULL,
+    reason smallint NOT NULL,
+    fee_returned boolean NOT NULL,
+    refunded_at timestamp with time zone NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT refund_amount_ck CHECK ((amount > 0)),
+    CONSTRAINT refund_currency_ck CHECK ((currency ~ '^[A-Z]{3}$'::text)),
+    CONSTRAINT refund_reason_ck CHECK ((reason = ANY (ARRAY[1, 2, 3, 4, 5])))
 );
 
 
@@ -228,6 +248,14 @@ ALTER TABLE ONLY mor.payout
 
 
 --
+-- Name: refund refund_pkey; Type: CONSTRAINT; Schema: mor; Owner: -
+--
+
+ALTER TABLE ONLY mor.refund
+    ADD CONSTRAINT refund_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: tax_rate tax_rate_pkey; Type: CONSTRAINT; Schema: mor; Owner: -
 --
 
@@ -285,6 +313,20 @@ CREATE INDEX payout_date_idx ON mor.payout USING btree (payout_date);
 
 
 --
+-- Name: refund_payment_idx; Type: INDEX; Schema: mor; Owner: -
+--
+
+CREATE INDEX refund_payment_idx ON mor.refund USING btree (payment_id);
+
+
+--
+-- Name: refund_reference_uk; Type: INDEX; Schema: mor; Owner: -
+--
+
+CREATE UNIQUE INDEX refund_reference_uk ON mor.refund USING btree (refund_reference);
+
+
+--
 -- Name: ledger_entry ledger_entry_transaction_id_fkey; Type: FK CONSTRAINT; Schema: mor; Owner: -
 --
 
@@ -325,8 +367,16 @@ ALTER TABLE ONLY mor.payout
 
 
 --
+-- Name: refund refund_payment_id_fkey; Type: FK CONSTRAINT; Schema: mor; Owner: -
+--
+
+ALTER TABLE ONLY mor.refund
+    ADD CONSTRAINT refund_payment_id_fkey FOREIGN KEY (payment_id) REFERENCES mor.payment(id);
+
+
+--
 -- PostgreSQL database dump complete
 --
 
-\unrestrict 9Yyew7N60zWBbg9QEC5Z0d7odGdYtdW0vwoigqUst8DgQCh55nq9bg83AvEjs1F
+\unrestrict DLleu7RhzAgxoPb0YmyIWSwpXx3DfURZICE4oFYsD9yUy77YhTHLrA9mirKM1UW
 
