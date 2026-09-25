@@ -213,6 +213,401 @@ Review outcome: **release** (moves to available, paid next night) or
 | sanctions | unknown merchant -> HELD |
 | amount limits | country vote fails -> HELD |
 
+## Refund
+
+The ledger **records** refunds, it does not decide them. Approval (refund
+policy, fraud review) happens earlier, in another service: the MoR approves,
+calls the PSP, the PSP returns the money to the customer's card, then the
+PSP calls the ledger. By then the money is already gone, so the ledger
+never declines a refund.
+
+- **One endpoint**: the PSP calls `POST /v1/payments/refund`. Same pattern
+  as capture: signature, schema, idempotency, one database round trip.
+- **Full and partial refunds.** One payment can have many refunds; a full
+  refund is simply a partial refund of 100%.
+- The customer always gets back exactly the refunded amount. Who bears our
+  fee is between the MoR and the merchant; the PSP and the customer do not
+  see it.
+
+### API
+
+```
+POST /v1/payments/refund
+Header: X-Signature   HMAC of the raw body, PSP shared secret
+```
+
+Request (normalized): what the PSP sends, mapped from its own format
+(Adyen `REFUND` notification, Stripe `refund` object):
+
+```
+refundReference   string     required  refund's own PSP id, new for every refund, idempotency key
+pspReference      string     required  original payment's PSP id, lookup key
+amount            int64      required  minor units, > 0, <= what is left to refund
+currency          string     required  ISO 4217, must equal payment.currency
+success           boolean    required  false = refund failed at the PSP: not processed
+reason            enum       optional  DUPLICATE / FRAUD / CUSTOMER_REQUEST /
+                                       PRODUCT_ISSUE / OTHER (missing = OTHER)
+refundedAt        date-time  required  when the PSP refunded
+```
+
+Example:
+
+```json
+{
+  "refundReference": "9915116497253970",
+  "pspReference": "8835116497253962",
+  "amount": 5000,
+  "currency": "EUR",
+  "success": true,
+  "reason": "CUSTOMER_REQUEST",
+  "refundedAt": "2026-09-25T09:30:00Z"
+}
+```
+
+Responses:
+
+| Code | When | Body |
+|---|---|---|
+| 200 | refund recorded | `{"status": "PARTIALLY_REFUNDED"}` or `{"status": "REFUNDED"}` (payment status after the refund) |
+| 200 | `success = false` | `{"status": "NOT_PROCESSED"}`, nothing saved |
+| 200 | same `refundReference` again | the stored answer |
+| 200 | cannot be booked (see *Error handling*) | `{"status": "QUEUED_FOR_REVIEW"}`, saved to `processing_error`, alert raised |
+| 401 | bad signature | problem details, nothing saved |
+| 404 | payment not found (PSP retries later) | problem details, nothing saved |
+| 5xx | database down, timeout | PSP retries |
+
+Queued for review: malformed body, same `refundReference` with a different
+body, amount more than left to refund, payment `FAILED`, currency differs,
+`refundedAt` date after today or before the capture date. A PSP retry
+cannot fix these, so we answer 200 to stop pointless retries and keep the
+event for a human.
+
+`reason` must come from our side (the MoR's refund service, via PSP
+metadata), never typed by the merchant. Stripe's own refund reasons
+(`duplicate`, `fraudulent`, `requested_by_customer`) map directly.
+
+### Flow
+
+```
+1. verify signature                    -> 401
+2. validate schema                     -> error table, 200 QUEUED_FOR_REVIEW
+3. success = false                     -> nothing saved, logged, 200 NOT_PROCESSED
+4. find refund by refundReference      -> same body: stored answer, 200
+                                          different body: error table, 200
+5. find payment by pspReference        -> not found: 404, PSP retries
+6. validate against payment            -> error table, 200
+7. split amount proportionally, apply fee rule
+8. save refund + payment update + ledger (one statement)
+                                       -> more than left: error table, 200
+                                          recorded: 200
+```
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant PSP
+    participant L as Ledger service
+    participant DB as Database
+    participant R as Review + alerts
+
+    PSP->>L: POST /v1/payments/refund
+    L->>L: verify signature
+    alt bad signature
+        L-->>PSP: 401 (nothing saved)
+    end
+    L->>L: validate schema<br/>required fields, amount > 0,<br/>currency format, refundedAt date <= today
+    alt malformed
+        L->>DB: save processing_error (MALFORMED)
+        L--)R: alert
+        L-->>PSP: 200 QUEUED_FOR_REVIEW
+    end
+
+    alt success = false
+        L-->>PSP: 200 NOT_PROCESSED (nothing saved, logged)
+    end
+
+    L->>DB: find refund by refundReference
+    alt exists, same body (PSP retry)
+        L-->>PSP: 200 stored answer
+    else exists, different body
+        L->>DB: save processing_error (IDEMPOTENCY_CONFLICT)
+        L--)R: alert
+        L-->>PSP: 200 QUEUED_FOR_REVIEW
+    end
+
+    L->>DB: find payment by pspReference
+    alt not found (refund before capture)
+        L-->>PSP: 404, PSP retries later
+    end
+
+    L->>L: validate against payment
+    alt payment FAILED / currency differs / refundedAt date before capture date
+        L->>DB: save processing_error (PAYMENT_FAILED / CURRENCY_MISMATCH / INVALID_DATE)
+        L--)R: alert
+        L-->>PSP: 200 QUEUED_FOR_REVIEW
+    end
+
+    L->>L: split amount proportionally<br/>(last refund takes what is left)
+    L->>L: fee rule by reason -> fee_returned
+
+    L->>DB: ONE statement:<br/>refunded_amount += amount if <= gross<br/>insert refund + REFUND ledger transaction<br/>payment.status = PARTIALLY_REFUNDED / REFUNDED
+    DB-->>L: result
+
+    alt more than left to refund
+        L->>DB: save processing_error (OVER_REFUND)
+        L--)R: alert
+        L-->>PSP: 200 QUEUED_FOR_REVIEW
+    else recorded
+        L-->>PSP: 200 PARTIALLY_REFUNDED / REFUNDED
+    end
+```
+
+**Date checks compare days, not timestamps** (UTC dates):
+
+- `refundedAt` date >= `capturedAt` date: same day is fine, a refund dated
+  before its payment's day is impossible -> error table.
+- `refundedAt` date <= today -> otherwise error table.
+- Both times come from the PSP, so clock skew is tiny; comparing days avoids
+  false rejections from seconds of skew. Rare edge left: capture 00:00:01,
+  refund stamped 23:59:59 the previous day. Accepted.
+
+**Database trips:** capture needs one; refund needs three (retry lookup,
+payment lookup, final statement) because it validates against stored data
+first. The retry lookup could move into the final statement later, like
+capture.
+
+**`success = false`** means the refund did not happen at the PSP.
+It is a final fact, not a delivery error, so the PSP will not retry it.
+Answering an error would make the PSP redeliver the same message for
+nothing. When the MoR retries and it succeeds, a new `refundReference`
+arrives and is recorded normally. The `refund` table therefore has no
+status column: every row is a successful refund. Failed attempts live only
+in the logs.
+
+**Payment lookup.** Uses the unique index on `payment.psp_reference`.
+The payment row holds everything frozen at capture: gross, tax, fee,
+merchant net, tax country, tax rate. No tax is recalculated, even if the
+country's rate changed since. PSP webhooks can arrive out of order (refund
+before capture), so 404 is safe: the PSP retries, and by then the capture is
+recorded.
+
+**Over-refund guard.** One atomic update, so two refunds arriving at the same moment
+can never together exceed the payment:
+
+```
+UPDATE payment SET refunded_amount = refunded_amount + :amount
+WHERE id = :paymentId AND refunded_amount + :amount <= gross
+-> 0 rows = more than what is left
+```
+
+### Split: tax follows the money
+
+Each refund takes its proportional share of the capture's tax and fee,
+immediately. Tax is owed only on what the customer finally keeps.
+
+```
+tax part  = amount x payment.tax / payment.gross
+fee part  = amount x payment.fee / payment.gross
+merchant  = amount - tax part - fee part
+```
+
+- **The last refund** (the one that brings `refunded_amount` to `gross`)
+  takes exactly what is left of tax, fee and merchant net. Rounding can
+  never leave a cent behind: all refunds together always equal the capture.
+- **No waiting** for the total: a partial refund usually means the customer
+  keeps the rest, so the total may never be reached. The money left the PSP
+  today, so the ledger shows it today. Each refund has its own credit note,
+  and the tax is reduced in the period of `refundedAt`.
+
+Example: customer paid 50 USD with 20% tax inside (8.33).
+
+```
+refund 20  -> tax back 20 x 8.33 / 50 = 3.33   (we owe the country less)
+kept   30  -> tax still owed          = 5.00   (the sale still exists for 30)
+```
+
+### Fee (MoR revenue) on refund
+
+The reason decides whether we return our fee part:
+
+| Reason | Whose fault | Our fee |
+|---|---|---|
+| `DUPLICATE` | ours (charged twice) | returned |
+| `FRAUD` | ours (fraud checks missed it) | returned |
+| `CUSTOMER_REQUEST` | merchant's refund policy | kept |
+| `PRODUCT_ISSUE` | merchant | kept |
+| `OTHER` / missing | unknown | kept (safe default) |
+
+- The reason -> fee rule lives in **config**, not code.
+- The decision (`fee_returned`) is **stored on the refund**, so a config
+  change never rewrites history.
+- Keeping the fee matches industry practice: large MoRs retain their
+  processing fee on refunds. When the fee is kept, the merchant covers it.
+
+### Writes (one statement, one round trip)
+
+A successful refund writes three things together, or nothing:
+
+1. insert into `refund`
+2. update `payment.refunded_amount` and `payment.status`
+   (`PARTIALLY_REFUNDED`, or `REFUNDED` when `refunded_amount = gross`)
+3. insert a `REFUND` ledger transaction with its entries
+
+```
+refund
+  id                uuid          PK
+  refund_reference  text          UNIQUE, idempotency (PSP retry -> stored answer)
+  payment_id        uuid          FK -> payment.id, many refunds per payment
+  amount            bigint        <= what was left
+  currency          text
+  reason            text          DUPLICATE / FRAUD / CUSTOMER_REQUEST /
+                                  PRODUCT_ISSUE / OTHER
+  fee_returned      boolean       frozen decision: was our fee part returned
+  refunded_at       timestamptz   from PSP
+  created_at        timestamptz
+
+  index (payment_id)              all refunds of one payment
+```
+
+- **`fee_returned` is frozen.** If the config says "FRAUD -> return fee"
+  today and "keep fee" tomorrow, refunds made today stay `true` forever.
+
+### Ledger entries
+
+Append-only: the capture entries are never changed. Each refund adds a new
+`REFUND` transaction with its share, signs reversed. Capture: 121 EUR,
+Spain, tax 21, fee 3, merchant 97.
+
+```
+full refund, fee kept              full refund, fee returned
+  PSP          -121                  PSP          -121
+  TAX ES        +21                  TAX ES        +21
+  MERCHANT X   +100                  REVENUE        +3
+                                     MERCHANT X    +97
+
+partial 50, fee kept
+  PSP           -50
+  TAX ES       +8.68
+  MERCHANT X  +41.32    merchant covers its share and our kept fee part
+```
+
+- Tax owed to Spain goes down by the refund's tax part.
+- Fee kept: the merchant covers the fee part.
+- Refund of a `HELD` payment: the lines go to the same accounts the capture
+  used (`HELD` instead of `MERCHANT`, same key). Rule: **a refund mirrors
+  the capture's own ledger lines, proportionally, signs flipped.**
+
+### Effect on merchant balance and payout
+
+The refund lowers the merchant's `MERCHANT` balance. The nightly payout
+simply sees the lower balance, no special refund logic:
+
+```
+Mon  capture 121          MERCHANT X balance   97
+Tue  00:05 payout 97      balance               0
+Wed  refund, fee kept     balance            -100   merchant owes us
+Thu  new sales +60        balance             -40   no payout
+Fri  new sales +70        balance             +30   payout 30
+```
+
+A negative balance is carried forward and recovered from future sales.
+
+### Refunded more than paid
+
+PSPs normally block refunding more than was captured. It still happens:
+
+| Case | How | Frequency |
+|---|---|---|
+| refund + chargeback | merchant refunds, customer also disputes with the bank: money goes out twice | most common |
+| unreferenced refund | some PSPs allow a refund (credit) not linked to any payment | rare |
+| PSP or our bug | lost or duplicated event | rare |
+
+The money has already moved, so the strictly correct handling is **record
+it and hold it for review**, never reject. The guard saves the event to
+`processing_error` (`OVER_REFUND`) and answers 200; a human resolves it
+with the PSP. Chargebacks are a
+separate event type with their own check (not implemented).
+
+### Refund failed later (not implemented)
+
+A refund can fail **after** it succeeded: Adyen can send `REFUND_FAILED`
+days later (e.g. the card no longer exists). The money comes back to us, so
+the ledger would have to reverse the refund with a new transaction.
+Documented, not handled.
+
+## Error handling
+
+Some PSP events cannot be booked: the data is wrong or contradicts what we
+stored. Rejecting them (4xx) makes the PSP retry for days, uselessly, and
+the money has already moved. Instead we **save the raw event, alert, and
+answer 200**. A human resolves it later.
+
+### What goes where
+
+| Situation | Where | Answer |
+|---|---|---|
+| Bad signature | nothing saved: could be an attacker spamming our DB | 401 |
+| Refund before its capture arrived | nothing saved: a PSP retry fixes it | 404 |
+| Database down, timeout | nothing saved: temporary | 5xx, PSP retries |
+| Unknown merchant, tax unresolved (capture) | `payment` as `HELD`: amounts are known, money is booked, only the owner is unclear | 200 |
+| Data wrong or contradictory | `processing_error`: cannot be booked at all | 200 `QUEUED_FOR_REVIEW` |
+
+Rule: **store only what a retry cannot fix.** `HELD` is for money we can
+book; `processing_error` is for events we cannot book.
+
+### Table
+
+```
+processing_error
+  id                  uuid          PK
+  event_type          text          CAPTURE / REFUND
+  external_reference  text          pspReference or refundReference
+  payload             jsonb         raw request, exactly as received
+  error_code          text          see below
+  error_detail        text          human-readable
+  status              text          OPEN / RESOLVED / IGNORED
+  resolution_note     text  null    what the human did
+  resolved_at         timestamptz   null
+  created_at          timestamptz
+
+  UNIQUE (event_type, external_reference, error_code)  PSP retries do not duplicate rows
+  index (status) WHERE status = 'OPEN'                  review queue
+```
+
+### Error codes and resolution
+
+Every error raises an alert. Resolution is **manual** for the task.
+
+| error_code | Event | Meaning | Resolution |
+|---|---|---|---|
+| `MALFORMED` | capture, refund | valid signature, broken body | fix the PSP mapping, replay |
+| `IDEMPOTENCY_CONFLICT` | capture, refund | same reference, different body | compare with the PSP, keep the correct version |
+| `OVER_REFUND` | refund | more than left to refund (e.g. refund + chargeback) | manual request to the PSP, then book or write off |
+| `PAYMENT_FAILED` | refund | refund of a payment whose capture failed | check with the PSP if the capture really failed |
+| `CURRENCY_MISMATCH` | refund | refund currency differs from payment | manual with the PSP |
+| `INVALID_DATE` | refund | refund dated after today or before its payment's day | verify dates with the PSP, replay if valid |
+
+Resolving = the human fixes the cause, sets `status = RESOLVED` (or
+`IGNORED`) with a `resolution_note`. Later: a **replay** action sends the
+stored payload through the same endpoint again; endpoints are idempotent,
+so replay is safe.
+
+### Weakness
+
+An open error means money moved at the PSP but **not** in our ledger:
+balances and tax are off by that amount until resolved. Mitigation:
+
+- alert on every new error, and again when one is **open more than 3 days**;
+- the balances report shows "N open errors, total X" next to the balances;
+- daily reconciliation with the PSP settlement report catches anything missed.
+
+### Production (not implemented)
+
+- Metrics (Prometheus) and dashboards (Grafana): errors per code, open
+  errors, age of the oldest open error; alert rules per code.
+- Automatic resolution for simple cases (e.g. auto-replay after a mapping
+  fix), a review UI, replay button.
+
 ## Database
 
 Table names are singular. Money is always exact `numeric(19,4)`, never binary

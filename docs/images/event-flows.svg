@@ -76,7 +76,7 @@
   <text x="196" y="601" text-anchor="middle" class="small">same key, different money data</text>
   <rect x="366" y="552" width="230" height="64" rx="12" fill="#ffffff" stroke="#d98278"/>
   <text x="481" y="579" text-anchor="middle" class="boxTitle">Over-refund</text>
-  <text x="481" y="601" text-anchor="middle" class="small">refund total exceeds capture</text>
+  <text x="481" y="601" text-anchor="middle" class="small">excess → suspense + review</text>
   <rect x="628" y="552" width="230" height="64" rx="12" fill="#ffffff" stroke="#d98278"/>
   <text x="743" y="579" text-anchor="middle" class="boxTitle">Unsupported fact</text>
   <text x="743" y="601" text-anchor="middle" class="small">currency, time or invariant</text>
