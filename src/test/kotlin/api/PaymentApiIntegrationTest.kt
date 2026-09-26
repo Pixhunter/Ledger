@@ -18,7 +18,6 @@ import org.example.model.enums.PaymentPurpose
 import org.example.model.enums.PaymentStatus
 import org.example.service.InMemoryMerchantRegistry
 import org.example.support.money
-import java.util.UUID
 import java.time.Instant
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -27,6 +26,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import org.example.randomUuid
 
 class PaymentApiIntegrationTest : LedgerApiIntegrationTestSupport() {
 
@@ -207,7 +207,7 @@ class PaymentApiIntegrationTest : LedgerApiIntegrationTestSupport() {
 
     @Test
     fun `unknown merchant is recorded and held`() = testApplication {
-        val differentKnownMerchant = UUID.randomUUID()
+        val differentKnownMerchant = randomUuid()
         application {
             ledgerModule(
                 config = testConfig(),

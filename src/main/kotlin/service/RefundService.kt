@@ -7,8 +7,8 @@ import org.example.model.enums.ProcessingErrorCode
 import org.example.repository.RefundStore
 import org.slf4j.LoggerFactory
 import java.time.Clock
-import java.time.Duration
-import java.util.UUID
+import org.example.Constants
+import org.example.randomUuid
 
 class RefundService(
     private val refunds: RefundStore,
@@ -27,25 +27,26 @@ class RefundService(
 
 
         if (request.refundedAt.isBefore(payment.paymentTime) ||
-            request.refundedAt.isAfter(clock.instant().plus(CLOCK_SKEW))
+            request.refundedAt.isAfter(clock.instant().plus(Constants.Dates.REFUND_MAX_FUTURE_DRIFT))
         ) {
             return LedgerResult.NotBookable(
                 LedgerError(
                     ProcessingErrorCode.INVALID_DATE,
                     request.refundReference,
-                    "refundedAt ${request.refundedAt}, payment at ${payment.paymentTime}",
+                    "refundedAt ${request.refundedAt}, payment at ${payment.paymentTime}, " +
+                        "now ${clock.instant()}, allowedFutureDrift=${Constants.Dates.REFUND_MAX_FUTURE_DRIFT}",
                 )
             )
         }
 
         val refund = RefundEntity(
-            id = UUID.randomUUID(),
+            id = randomUuid(),
             refundReference = request.refundReference,
             paymentId = payment.id,
             amount = request.amount,
             currency = request.currency,
             reason = request.reason,
-            feeReturned = FEE_RETURNED,
+            feeReturned = Constants.Fees.FEE_RETURNED_ON_REFUND,
             refundedAt = request.refundedAt,
         )
 
@@ -77,11 +78,4 @@ class RefundService(
         }
     }
 
-    private companion object {
-        // The MoR keeps its fee on every refund; the merchant covers it. Frozen on the
-        // row, so varying it by reason later never rewrites history.
-        const val FEE_RETURNED = false
-
-        val CLOCK_SKEW: Duration = Duration.ofDays(60)
-    }
 }

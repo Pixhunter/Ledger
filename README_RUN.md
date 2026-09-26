@@ -31,14 +31,20 @@ Override with `DB_URL`, `DB_USER`, `DB_PASSWORD`, `DB_POOL_SIZE`.
 
 ## 2. Generated sources
 
-Both are committed, so a clean clone builds with no database.
-Re-run only after changing a migration or the API spec.
+`src/generated` is **not committed** - it is in `.gitignore`. A clean clone
+does not compile until these run, and jOOQ reads the live database, so step 1
+has to come first. CI does the same thing on every push
+(`.github/workflows/ci.yml`).
 
 ```bash
 ./scripts/jooq-generate.sh   # db/migration -> src/generated/jooq (needs step 1)
 ./scripts/api-generate.sh    # api/definitions.yaml -> src/generated/api
-./scripts/db-schema.sh       # refreshes db/schema.sql
+./scripts/db-schema.sh       # refreshes db/schema.sql (optional)
 ```
+
+Re-run `jooq-generate.sh` after changing a migration and `api-generate.sh`
+after changing the API spec. Gradle equivalents: `./gradlew jooqCodegen
+apiCodegen`.
 
 ## 3. Run
 
@@ -62,7 +68,7 @@ ada07d6c-0000-4000-8000-000000000010   Juniper Books, SUSPENDED
 Blank `mor.merchantSeedResource` to switch it off; in production merchants
 come from the onboarding service.
 
-## 4. Swagger
+## 5. Swagger
 
 With the app running:
 
@@ -78,31 +84,48 @@ web server on :63342.
 
 ```bash
 SECRET=dev-psp-secret-change-me
-BODY='{"pspReference":"psp-1","merchantId":"1a1e7d6c-0000-4000-8000-000000000001","amount":12100,"currency":"EUR","success":true,"billingAddress":{"country":"ES"},"cardIssuingCountry":"ES","paymentTime":"2026-09-22T10:15:30Z"}'
+NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+BODY='{"pspReference":"psp-1","merchantId":"1a1e7d6c-0000-4000-8000-000000000001","amount":121.00,"currency":"EUR","success":true,"billingAddress":{"country":"ES"},"cardIssuingCountry":"ES","paymentTime":"'"$NOW"'"}'
 SIG=$(printf %s "$BODY" | openssl dgst -sha256 -hmac "$SECRET" -hex | awk '{print $2}')
 
-curl -X POST localhost:8081/v1/payments \
+curl -X POST localhost:8081/v1/payment/capture \
   -H 'Content-Type: application/json' \
   -H "X-Psp-Signature: $SIG" \
   -d "$BODY"
 
-# the request below is the same body, unsigned - it returns 401
-curl -X POST localhost:8081/v1/payments \
+# same body, unsigned - returns 401 and stores nothing
+curl -i -X POST localhost:8081/v1/payment/capture \
   -H 'Content-Type: application/json' \
-  -d '{
-    "pspReference": "psp-1",
-    "merchantId":   "1a1e7d6c-0000-4000-8000-000000000001",
-    "amount":       12100,
-    "currency":     "EUR",
-    "billingAddress": { "country": "ES" },
-    "cardIssuingCountry": "ES",
-    "paymentTime": "2026-09-22T10:15:30Z"
-  }'
+  -d "$BODY"
 ```
 
-Send it twice - the second call returns the stored answer and writes nothing.
+Send the signed call twice - the second returns the stored answer and writes
+nothing.
 
-## 5. Tests
+`amount` is euros, not minor units: `121.00` is EUR 121.00. `paymentTime` is
+the tax point and must be within 7 days of now, so the example generates it.
+
+Refund it, then read the two reports:
+
+```bash
+SECRET=dev-psp-secret-change-me
+NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+REFUND='{"refundReference":"ref-1","pspReference":"psp-1","amount":50.00,"currency":"EUR","success":true,"reason":"CUSTOMER_REQUEST","refundedAt":"'"$NOW"'"}'
+RSIG=$(printf %s "$REFUND" | openssl dgst -sha256 -hmac "$SECRET" -hex | awk '{print $2}')
+
+curl -X POST localhost:8081/v1/payment/refund \
+  -H 'Content-Type: application/json' \
+  -H "X-Psp-Signature: $RSIG" \
+  -d "$REFUND"
+
+curl "localhost:8081/v1/balances/tax?country=ES"
+curl "localhost:8081/v1/balances/merchants?limit=10"
+```
+
+The balances endpoints are finance reports, not PSP webhooks, so they take no
+signature.
+
+## 6. Tests
 
 ```bash
 ./gradlew test --rerun
@@ -124,6 +147,7 @@ and pins the Docker API version - see `tasks.test` in `build.gradle.kts`.
 | database tests SKIPPED | same, or the socket path is not in `tasks.test` |
 | `server: IntelliJ IDEA` in a response | IntelliJ's built-in server answered, not this app |
 | `Address already in use` on 8081 | `lsof -i:8081` |
+| `Unresolved reference: jooq` / `dto` at compile time | step 2 was not run in this clone |
 
 ## Continuous integration
 

@@ -47,6 +47,9 @@ fun Application.apiRoutes(controller: LedgerController, balances: BalancesContro
                 balances.merchantBalances(
                     merchantIds = call.request.queryParameters.getAll("merchantId").orEmpty(),
                     date = call.request.queryParameters["date"],
+                    asOf = call.request.queryParameters["asOf"],
+                    after = call.request.queryParameters["after"],
+                    limit = call.request.queryParameters["limit"],
                 )
             )
         }

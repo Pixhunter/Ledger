@@ -19,6 +19,8 @@ import java.time.OffsetDateTime
 import java.time.ZoneOffset
 import java.time.Instant
 import java.util.UUID
+import org.example.Constants
+import org.example.randomUuid
 
 class PayoutRepository(private val dsl: DSLContext) : PayoutStore {
 
@@ -122,7 +124,7 @@ class PayoutRepository(private val dsl: DSLContext) : PayoutStore {
 
         dsl.transactionResult { cfg ->
             val db = DSL.using(cfg)
-            val transactionByMerchant = candidates.associate { it.merchantId to UUID.randomUUID() }
+            val transactionByMerchant = candidates.associate { it.merchantId to randomUuid() }
 
             val transactions = db.insertInto(
                 LEDGER_TRANSACTION,
@@ -238,7 +240,7 @@ class PayoutRepository(private val dsl: DSLContext) : PayoutStore {
                 SELECT merchant_id, payout_date
                 FROM mor.payout
                 WHERE status = ?
-                   OR (status = ? AND claimed_at < now() - interval '5 minutes')
+                   OR (status = ? AND claimed_at < now() - make_interval(mins => ${Constants.Jobs.CLAIM_TIMEOUT_MINUTES}))
                 ORDER BY payout_date, merchant_id
                 FOR UPDATE SKIP LOCKED
                 LIMIT ?

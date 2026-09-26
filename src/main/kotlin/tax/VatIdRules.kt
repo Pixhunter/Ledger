@@ -3,6 +3,7 @@ package org.example.tax
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
+import org.example.Constants
 
 data class VatIdRule(
     val country: String,
@@ -24,8 +25,8 @@ class VatIdRules(private val rules: List<VatIdRule> = EU_RULES) {
     }
 
     companion object {
-        private val START = LocalDate.of(2021, 1, 1)
-        private const val BASELINE = "EU VAT identification format baseline"
+        private val START = Constants.Sources.VALID_FROM
+        private val BASELINE = Constants.Sources.EU_VAT_ID_BASELINE
         private fun rule(country: String, body: String) = VatIdRule(country, START, Regex("^$country$body$"), BASELINE)
 
         val EU_RULES = listOf(

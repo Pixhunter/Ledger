@@ -27,6 +27,7 @@ import org.slf4j.LoggerFactory
 import java.util.UUID
 import java.math.BigDecimal
 import java.time.ZoneOffset
+import org.example.randomUuid
 
 class RefundRepository(private val dsl: DSLContext) : RefundStore {
 
@@ -75,7 +76,7 @@ class RefundRepository(private val dsl: DSLContext) : RefundStore {
             val db = DSL.using(cfg)
 
             val gross = paymentGrossForUpdate(db, refund.paymentId)
-            val transactionId = UUID.randomUUID()
+            val transactionId = randomUuid()
 
             val inserted: UUID? = db
                 .insertInto(REFUND)
@@ -107,7 +108,7 @@ class RefundRepository(private val dsl: DSLContext) : RefundStore {
                     insertProcessingError(
                         db,
                         ProcessingError(
-                            id = UUID.randomUUID(),
+                            id = randomUuid(),
                             eventType = EventType.REFUND,
                             externalReference = refund.refundReference,
                             payload = rawPayload,
@@ -177,7 +178,7 @@ class RefundRepository(private val dsl: DSLContext) : RefundStore {
                 insertProcessingError(
                     db,
                     ProcessingError(
-                        id = UUID.randomUUID(),
+                        id = randomUuid(),
                         eventType = EventType.REFUND,
                         externalReference = refund.refundReference,
                         payload = rawPayload,

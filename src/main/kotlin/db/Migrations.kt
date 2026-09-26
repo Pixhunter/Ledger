@@ -3,6 +3,7 @@ package org.example.db
 import org.flywaydb.core.Flyway
 import org.slf4j.LoggerFactory
 import javax.sql.DataSource
+import org.example.Constants
 
 /**
  * Migrations run at application startup, not from a separate container.
@@ -20,13 +21,11 @@ object Migrations {
 
     private val log = LoggerFactory.getLogger(Migrations::class.java)
 
-    private const val HISTORY_SCHEMA = "public"
-
     fun run(dataSource: DataSource) {
         val result = Flyway.configure()
             .dataSource(dataSource)
             .locations("filesystem:db/migration", "classpath:db/migration")
-            .defaultSchema(HISTORY_SCHEMA)
+            .defaultSchema(Constants.Config.FLYWAY_HISTORY_SCHEMA)
             .createSchemas(true)
             .load()
             .migrate()

@@ -4,6 +4,7 @@ import org.example.model.enums.Currency
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
+import org.example.Constants
 
 data class TaxRate(
     val country: String,
@@ -26,7 +27,7 @@ class TaxRates(private val rates: List<TaxRate> = EU_STANDARD_HISTORY) {
 
     companion object {
         private val HISTORY_START = LocalDate.of(2021, 1, 1)
-        private const val EC_2021 = "European Commission VAT rates, 1 January 2021"
+        private val EC_2021 = Constants.Sources.EC_VAT_RATES_2021
 
         private fun rate(country: String, bps: Int, from: LocalDate = HISTORY_START, law: String = EC_2021) =
             TaxRate(country, Currency.EUR, from, BasisPoints(bps), law)

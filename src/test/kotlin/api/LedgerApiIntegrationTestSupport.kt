@@ -8,6 +8,8 @@ import io.ktor.http.ContentType
 import io.ktor.http.contentType
 import io.ktor.server.testing.ApplicationTestBuilder
 import org.example.jooq.tables.references.LEDGER_ENTRY
+import org.example.jooq.tables.references.MERCHANT
+import org.example.jooq.tables.references.MERCHANT_PAYMENT_DETAILS
 import org.example.jooq.tables.references.LEDGER_TRANSACTION
 import org.example.jooq.tables.references.PAYMENT
 import org.example.jooq.tables.references.PAYMENT_HOLD
@@ -15,6 +17,8 @@ import org.example.jooq.tables.references.REFUND
 import org.example.api.security.PspSignature
 import org.example.model.enumById
 import org.example.model.enums.PaymentPurpose
+import org.example.model.enums.TaxCategory
+import org.jooq.JSONB
 import org.example.support.PostgresTest
 import org.example.support.money
 import java.math.BigDecimal
@@ -25,13 +29,14 @@ import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 import org.example.config.AppConfig
 import org.example.config.PspConfig
+import org.example.randomUuid
 
 abstract class LedgerApiIntegrationTestSupport : PostgresTest() {
 
-    protected val merchantId: UUID = UUID.randomUUID()
+    protected val merchantId: UUID = randomUuid()
     protected fun testConfig() = AppConfig(psp = PspConfig(PSP_SECRET))
-    protected val pspReference = "psp-${UUID.randomUUID()}"
-    protected val refundReference = "ref-${UUID.randomUUID()}"
+    protected val pspReference = "psp-${randomUuid()}"
+    protected val refundReference = "ref-${randomUuid()}"
     private val paymentTime: Instant = Instant.now().minus(1, ChronoUnit.HOURS)
     private val refundTime: Instant = Instant.now()
 
@@ -131,6 +136,34 @@ abstract class LedgerApiIntegrationTestSupport : PostgresTest() {
 
     protected fun List<Pair<PaymentPurpose, BigDecimal>>.balance(purpose: PaymentPurpose): BigDecimal =
         filter { it.first == purpose }.fold(money("0")) { total, entry -> total + entry.second }
+
+    protected fun seedMerchant(merchantId: UUID = this.merchantId) {
+        dsl.transaction { cfg ->
+            val db = org.jooq.impl.DSL.using(cfg)
+
+            db.insertInto(MERCHANT)
+                .set(MERCHANT.ID, merchantId)
+                .set(MERCHANT.NAME, "Test merchant")
+                .set(MERCHANT.CURRENCY, "EUR")
+                .set(MERCHANT.FEE_RATE_BPS, 500)
+                .set(MERCHANT.TAX_CATEGORY, TaxCategory.STANDARD.id)
+                .set(MERCHANT.STATUS, 1.toShort())
+                .onConflict(MERCHANT.ID)
+                .doNothing()
+                .execute()
+
+            db.insertInto(MERCHANT_PAYMENT_DETAILS)
+                .set(MERCHANT_PAYMENT_DETAILS.MERCHANT_ID, merchantId)
+                .set(MERCHANT_PAYMENT_DETAILS.PSP_ACCOUNT_ID, "acct-merchant-1")
+                .set(MERCHANT_PAYMENT_DETAILS.ACCOUNT_HOLDER, "Test merchant")
+                .set(MERCHANT_PAYMENT_DETAILS.IBAN, "DE89370400440532013000")
+                .set(MERCHANT_PAYMENT_DETAILS.BANK_COUNTRY, "DE")
+                .set(MERCHANT_PAYMENT_DETAILS.ADDRESS, JSONB.valueOf("""{"country":"DE"}"""))
+                .onConflict(MERCHANT_PAYMENT_DETAILS.MERCHANT_ID)
+                .doNothing()
+                .execute()
+        }
+    }
 
     protected companion object {
         const val PSP_SECRET = "test-psp-secret"

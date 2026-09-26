@@ -19,7 +19,6 @@ import org.example.model.enums.PaymentPurpose
 import org.example.model.enums.PaymentStatus
 import org.example.model.enums.RefundReason
 import org.example.support.money
-import java.util.UUID
 import java.time.Instant
 import java.time.temporal.ChronoUnit
 import kotlinx.coroutines.async
@@ -28,6 +27,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import org.example.randomUuid
 
 class RefundApiIntegrationTest : LedgerApiIntegrationTestSupport() {
 
@@ -217,7 +217,7 @@ class RefundApiIntegrationTest : LedgerApiIntegrationTestSupport() {
     }
 
     @Test
-    fun `refund dates before payment or far in the future are reported and not booked`() = testApplication {
+    fun `refund dates before payment or outside the future window are reported and not booked`() = testApplication {
         application { ledgerModule(testConfig(), dsl, InMemoryMerchantRegistry(setOf(merchantId))) }
         val paymentTime = Instant.now().minus(1, ChronoUnit.HOURS).truncatedTo(ChronoUnit.MILLIS)
         assertEquals(
@@ -238,7 +238,7 @@ class RefundApiIntegrationTest : LedgerApiIntegrationTestSupport() {
                 PAYMENT_REFUND_ENDPOINT,
                 refundBody(
                     refundReference = "far-future",
-                    refundedAt = Instant.now().plus(61, ChronoUnit.DAYS),
+                    refundedAt = Instant.now().plus(3, ChronoUnit.DAYS),
                 ),
             ).status,
         )
@@ -246,6 +246,26 @@ class RefundApiIntegrationTest : LedgerApiIntegrationTestSupport() {
         assertEquals(0, dsl.fetchCount(REFUND))
         assertEquals(1, dsl.fetchCount(LEDGER_TRANSACTION))
         assertEquals(2, dsl.fetchCount(PROCESSING_ERROR))
+    }
+
+    @Test
+    fun `a refund dated inside the future window is booked`() = testApplication {
+        application { ledgerModule(testConfig(), dsl, InMemoryMerchantRegistry(setOf(merchantId))) }
+        val paymentTime = Instant.now().minus(1, ChronoUnit.HOURS).truncatedTo(ChronoUnit.MILLIS)
+        assertEquals(
+            HttpStatusCode.OK,
+            send(PAYMENT_CAPTURE_ENDPOINT, paymentBody(paymentTime = paymentTime)).status,
+        )
+
+        val tomorrow = Instant.now().plus(1, ChronoUnit.DAYS).truncatedTo(ChronoUnit.MILLIS)
+        assertEquals(
+            HttpStatusCode.OK,
+            send(PAYMENT_REFUND_ENDPOINT, refundBody(refundedAt = tomorrow)).status,
+        )
+
+        assertEquals(1, dsl.fetchCount(REFUND))
+        assertEquals(0, dsl.fetchCount(PROCESSING_ERROR))
+        assertEquals(tomorrow, dsl.selectFrom(REFUND).fetchSingle().refundedAt.toInstant())
     }
 
     @Test
@@ -337,9 +357,9 @@ class RefundApiIntegrationTest : LedgerApiIntegrationTestSupport() {
 
         assertEquals(HttpStatusCode.OK, send(PAYMENT_CAPTURE_ENDPOINT, paymentBody()).status)
 
-        val firstReference = "ref-${UUID.randomUUID()}"
-        val secondReference = "ref-${UUID.randomUUID()}"
-        val finalReference = "ref-${UUID.randomUUID()}"
+        val firstReference = "ref-${randomUuid()}"
+        val secondReference = "ref-${randomUuid()}"
+        val finalReference = "ref-${randomUuid()}"
 
         assertEquals(
             HttpStatusCode.OK,
@@ -411,7 +431,7 @@ class RefundApiIntegrationTest : LedgerApiIntegrationTestSupport() {
                 send(
                     PAYMENT_REFUND_ENDPOINT,
                     refundBody(
-                        refundReference = "cent-${index + 1}-${UUID.randomUUID()}",
+                        refundReference = "cent-${index + 1}-${randomUuid()}",
                         amount = money("0.01"),
                     ),
                 ).status,
@@ -430,7 +450,7 @@ class RefundApiIntegrationTest : LedgerApiIntegrationTestSupport() {
             HttpStatusCode.OK,
             send(
                 PAYMENT_REFUND_ENDPOINT,
-                refundBody(refundReference = "cent-1000-${UUID.randomUUID()}", amount = money("0.01")),
+                refundBody(refundReference = "cent-1000-${randomUuid()}", amount = money("0.01")),
             ).status,
         )
 
@@ -542,7 +562,7 @@ class RefundApiIntegrationTest : LedgerApiIntegrationTestSupport() {
             HttpStatusCode.OK,
             send(
                 PAYMENT_REFUND_ENDPOINT,
-                refundBody(refundReference = "held-final-${UUID.randomUUID()}", amount = money("60.50")),
+                refundBody(refundReference = "held-final-${randomUuid()}", amount = money("60.50")),
             ).status,
         )
 

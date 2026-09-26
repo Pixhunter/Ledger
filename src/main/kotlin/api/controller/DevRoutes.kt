@@ -20,7 +20,8 @@ import org.example.remittance.TaxRemittanceDisbursementJob
 import java.io.File
 import java.math.BigDecimal
 import java.time.LocalDate
-import java.time.ZoneId
+import org.example.Constants.Jobs.REPORTING_ZONE
+import org.example.Constants.Dev.SERVERS_BLOCK
 
 fun Application.devRoutes(
     server: ServerConfig,
@@ -33,7 +34,7 @@ fun Application.devRoutes(
 
         // Manual triggers for the scheduled jobs. Operational only.
         post("/v1/payouts/compute") {
-            val today = LocalDate.now(LONDON)
+            val today = LocalDate.now(REPORTING_ZONE)
             val computed = payoutCalculation.run(today)
 
             call.respond(
@@ -59,7 +60,7 @@ fun Application.devRoutes(
         }
 
         post("/v1/tax-remittances/compute") {
-            val period = LocalDate.now(LONDON).withDayOfMonth(1)
+            val period = LocalDate.now(REPORTING_ZONE).withDayOfMonth(1)
             val computed = taxCalculation.run(period)
 
             call.respond(
@@ -111,8 +112,6 @@ fun Application.devRoutes(
     }
 }
 
-private val LONDON: ZoneId = ZoneId.of("Europe/London")
-
 @Serializable
 private data class PayoutRunResponse(
     val payoutDate: String,
@@ -145,7 +144,6 @@ private data class TaxRemittanceResponse(
     val amount: String,
 )
 
-private val SERVERS_BLOCK = Regex("""(?m)^servers:\n(?:[ \t-].*\n?)*""")
 
 /** The spec carries no servers block: the app injects where it is actually listening. */
 private suspend fun ApplicationCall.respondSpec(spec: File, publicUrl: String) {
@@ -155,7 +153,7 @@ private suspend fun ApplicationCall.respondSpec(spec: File, publicUrl: String) {
     }
 
     val body = SERVERS_BLOCK.replace(spec.readText(), "").trimEnd() +
-        "\n\nservers:\n  - url: " + publicUrl + "\n"
+            "\n\nservers:\n  - url: " + publicUrl + "\n"
 
     respondText(body, ContentType.parse("application/yaml"))
 }

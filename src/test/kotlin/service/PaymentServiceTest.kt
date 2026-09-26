@@ -25,10 +25,11 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
+import org.example.randomUuid
 
 class PaymentServiceTest {
 
-    private val merchantId = UUID.randomUUID()
+    private val merchantId = randomUuid()
 
     @Test
     fun `posts a payment for a known merchant in a supported country`() {
@@ -81,7 +82,7 @@ class PaymentServiceTest {
     fun `holds a payment for an unknown merchant without losing the merchant id`() {
         val store = RecordingStore()
 
-        val result = run(store, request(), known = setOf(UUID.randomUUID()))
+        val result = run(store, request(), known = setOf(randomUuid()))
 
         val recorded = assertIs<LedgerResult.Recorded>(result)
         assertEquals(PaymentStatus.POSTED, recorded.paymentStatus)
@@ -183,7 +184,7 @@ class PaymentServiceTest {
         vatId: String? = null,
         paymentTime: Instant = Instant.parse("2026-09-22T10:15:30Z"),
     ) = PaymentModel(
-        pspReference = "psp-${UUID.randomUUID()}",
+        pspReference = "psp-${randomUuid()}",
         merchantId = merchantId,
         amount = amount,
         currency = Currency.EUR,

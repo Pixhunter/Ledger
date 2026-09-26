@@ -20,8 +20,8 @@ import org.example.service.LedgerError
 import org.example.service.LedgerResult
 import org.example.service.PaymentService
 import org.example.service.RefundService
-import java.util.UUID
 import org.slf4j.LoggerFactory
+import org.example.randomUuid
 
 class LedgerController(
     private val payments: PaymentService,
@@ -91,7 +91,7 @@ class LedgerController(
     private suspend fun record(error: LedgerError, eventType: EventType, rawBody: String) =
         errors.save(
             ProcessingError(
-                id = UUID.randomUUID(),
+                id = randomUuid(),
                 eventType = eventType,
                 externalReference = error.reference,
                 payload = rawBody,

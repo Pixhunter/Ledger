@@ -73,6 +73,11 @@ fun Application.ledgerModule(
             log.warn("bad request: {}", cause.message)
             call.respond(HttpStatusCode.BadRequest, rejected(ErrorReasonDto.INVALID_REQUEST))
         }
+        // Date parsing throws outside the IllegalArgumentException hierarchy.
+        exception<java.time.DateTimeException> { call, cause ->
+            log.warn("bad request: {}", cause.message)
+            call.respond(HttpStatusCode.BadRequest, rejected(ErrorReasonDto.INVALID_REQUEST))
+        }
     }
 
     val processingErrors = ProcessingErrorRepository(dsl)

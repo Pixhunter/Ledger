@@ -176,11 +176,15 @@ paths:
         Current balance per merchant: `available` is payable on the next payout
         run, `held` is recorded but frozen and never paid out.
 
-        Repeat `merchantId` to ask for several. Omitting it returns every
-        merchant with a balance, which is fine at this size and would need
-        paging at scale.
+        Repeat `merchantId` to ask for several, at most 100 per call.
+        Omitting it walks every merchant with a balance, one keyset page at a
+        time: pages are ordered by merchant id, capped by `limit`, and
+        continued by passing the response's `nextCursor` back as `after`.
 
-        Without `date` the answer is the live balance summed from the ledger.
+        Without `date` the answer is the live balance summed from the ledger up
+        to `asOf` (default now). Entries dated later are excluded: the PSP may
+        date a capture into the future, and the payout job withholds it until
+        its tax point passes, so the balance must too.
         With `date` it is that day's close, read from the nightly snapshot -
         one indexed row, and the number the payout job actually acted on. The
         snapshot has no row for a day the close job did not run, and it records
@@ -191,7 +195,7 @@ paths:
         - name: merchantId
           in: query
           required: false
-          description: Repeat for several merchants. Omit for all.
+          description: Repeat for several merchants, at most 100. Omit to page through all.
           schema:
             type: array
             items:
@@ -206,6 +210,31 @@ paths:
             type: string
             format: date
           example: '2026-09-25'
+        - name: asOf
+          in: query
+          required: false
+          description: |
+            Cutoff for the live balance. Defaults to now. Pass the value echoed
+            in the response to keep every page of a walk on one instant.
+          schema:
+            type: string
+            format: date-time
+          example: '2026-09-26T18:12:00Z'
+        - name: after
+          in: query
+          required: false
+          description: Last merchant id of the previous page. Omit for the first page.
+          schema:
+            $ref: './definitions.yaml#/components/schemas/Id'
+        - name: limit
+          in: query
+          required: false
+          description: Page size.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 100
       responses:
         '200':
           description: Balances
@@ -217,13 +246,15 @@ paths:
                 currency: EUR
                 date: null
                 asOf: '2026-09-26T18:12:00Z'
+                limit: 100
+                nextCursor: null
                 merchants:
                   - merchantId: 1a1e7d6c-0000-4000-8000-000000000001
                     merchantName: Aurora SaaS
                     available: '95.00'
                     held: '0.00'
         '400':
-          description: Malformed merchant id
+          description: Malformed merchant id, date, asOf or cursor; more than 100 merchant ids; limit out of range
           content:
             application/json:
               schema:

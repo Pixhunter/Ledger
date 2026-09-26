@@ -72,9 +72,21 @@ Two read-only reports over the ledger. Neither writes anything, and both are a
 `SUM` over `ledger_entry`, which carries its own `occurred_at` so no join is
 needed.
 
+Each report answers from **one database snapshot**. The tax report is a single
+statement using aggregate `FILTER`s; the merchant report runs its two
+statements inside a `REPEATABLE READ READ ONLY` transaction. Split across
+separate `READ COMMITTED` statements, a capture landing mid-report could
+produce a `movement` matching neither endpoint.
+
 `occurred_at` is the **tax point** - `paymentTime` for a capture, `refundedAt`
 for a refund - not when the row was written. A sale on 31 August belongs to
 August even if the webhook arrived in September.
+
+Because the tax point decides the period, future dates are bounded:
+`refundedAt` must be at or after `paymentTime` and no more than 2 days ahead
+of now (`RefundService.MAX_FUTURE_DRIFT`), otherwise the refund is
+`INVALID_DATE` in the error table. Captures allow 7 days either way
+(`PaymentService.MAX_DATE_DRIFT`) and only warn.
 
 | Report | Question | Caller |
 |--------|----------|--------|
@@ -99,10 +111,20 @@ left until there are enough countries to justify it.
 ### Merchant balances
 
 `available` is payable on the next payout run. `held` is recorded but frozen
-and never paid out. Repeating `merchantId` asks for several; omitting it
-returns everyone with a balance, which needs paging at scale.
+and never paid out. Repeating `merchantId` asks for several, at most 100 per
+call; omitting it pages through everyone with a balance.
 
-Without `date` the answer is the live ledger balance. With `date` it is that
+Paging is keyset, not offset: pages are ordered by merchant id, capped by
+`limit` (default 100, max 500), and continued by passing the response's
+`nextCursor` back as `after`. Cost per page is constant, so an unfiltered call
+can never aggregate the whole ledger into one response.
+
+Without `date` the answer is the live ledger balance up to `asOf`, which
+defaults to now. `occurred_at` is the tax point, and a capture is accepted with
+a tax point up to `MAX_DATE_DRIFT` (7 days) in the future, so without the
+cutoff a sale dated next week would read as `available` while the payout job
+correctly withholds it. Passing the echoed `asOf` back pins every page of a
+walk to one instant. With `date` it is that
 day's close, read from `merchant_daily_balance` - one indexed row instead of a
 sum, and the number the payout job acted on, which is what a dispute is about.
 
@@ -111,6 +133,8 @@ run, and it records the merchant balance only, so `held` is absent for a past
 date.
 
 ### Not implemented
+
+Full list in README.md, "Production TODOs".
 
 - **Merchant activity statement**: captures, refunds and payouts between two
   dates. Same data, grouped by `ledger_transaction.type`.
@@ -125,9 +149,9 @@ date.
 
 | Process                   | Rule                                                 | Status      |
 |---------------------------|------------------------------------------------------|-------------|
-| Merchant payout           | Daily positive balance; exclude `HELD`; fixed cutoff | Implemented |
-| Negative merchant balance | Carry forward; alert after 14 days                   | Planned     |
-| Tax settlement            | Pay per country and filing calendar, usually monthly | Planned     |
+| Merchant payout           | Daily positive balance; exclude `HELD`; fixed cutoff | Implemented, mock PSP client |
+| Negative merchant balance | Carry forward; alert after 14 days                   | Detection implemented; recovery planned |
+| Tax settlement            | Pay per country, monthly on the 5th for the month before | Implemented, mock authority client |
 | Tax rates                 | Version with `valid_from`; cache; freeze on capture  | Implemented |
 | PSP reconciliation        | Compare PSP and ledger totals daily                  | Planned     |
 
@@ -145,6 +169,22 @@ Hourly payout is a later option. It changes scheduling, not accounting.
 - A non-positive balance is carried forward and future sales offset it.
 - If a merchant remains negative for 14 days, alert operations.
 
+## Tax remittance
+
+- One return per country per month, filed on the 5th for the month before.
+- **The return is bounded by the period end.** Only `TAX` entries whose tax
+  point is before the first of the filing month are included, so a sale made
+  on filing day belongs to the next return, not the one being filed.
+- Filing **settles** the entries it covers (`settled_by_transaction_id`).
+  Re-running is a no-op, and a late entry dated inside a closed period is
+  picked up by the next return as an adjustment rather than reopening a filed
+  one.
+- Settling and summing happen in one statement, so an entry landing mid-run is
+  either wholly inside the return or wholly outside it - never counted in one
+  and not the other.
+- A country whose balance is zero or negative is skipped. The credit stays
+  unsettled and reduces the next period; after 3 negative days it is reported.
+
 ## Tax category
 
 Only the standard tax category is supported for this task. Reduced and special
@@ -160,15 +200,28 @@ billing country remains the fallback; weak evidence creates
 
 ## Architecture status
 
-**Works now:** synchronous posting, idempotency with conflict detection,
-balanced entries, held payments, cumulative refunds, concurrent-refund
-serialization, exact decimal money, over-refund suspense, and the
-`processing_error` exception queue.
+**Works now:** synchronous posting; idempotency with conflict detection;
+balanced entries; held payments; cumulative refunds; concurrent-refund
+serialization; exact decimal money; over-refund suspense; the
+`processing_error` exception queue; the merchant table with startup seeding
+from `merchants.json`; versioned tax rates frozen at capture; the daily payout
+pair (calculate, then disburse) with a nightly balance snapshot;
+negative-balance detection with a 14-day alert; the monthly tax remittance
+pair with a daily tax-balance monitor; and both balance reports.
 
-**Missing for production:** merchant table, alert delivery, exception
-resolution and replay, payout worker, negative-balance recovery, tax feed and
-versioned rates, tax payment, PSP reconciliation, database failover and load
-tests.
+**Implemented against mocks:** the PSP payout client and the tax authority
+client always succeed. The jobs, ledger entries and idempotency keys are real;
+the bank and the filing integration behind them are not.
+
+**Missing for production:** alert delivery - an alert today is a log line plus
+a `processing_error` row, nothing is sent anywhere; exception resolution and
+replay; negative-balance recovery, as opposed to detection; an external
+tax-rate feed, the versioning and freeze-at-capture being already in place;
+PSP reconciliation; reversal of failed payouts and remittances, and
+chargebacks; auth and RBAC on the reports; database failover, backups and
+PITR; load tests.
+
+Full list with reasoning: README.md, "Production TODOs".
 
 ## Expected scale
 
@@ -185,6 +238,19 @@ tests.
 | Large scale     | 100 million |     1.2k / 12k |  33m / 167m |  500 million |      250 million | 100 thousand | Architecture change: queue, database shards and per-shard tax aggregation      |
 
 Those numbers must be changed after the load testing!!!
+
+### Verdict per load, today
+
+| Load | Verdict |
+|---|---|
+| 100 writes/s | Realistic |
+| 1,000 writes/s | Plausible, unproven - needs suitable PostgreSQL infrastructure |
+| 1,000 balance reports/s | Not realistic: the live balance is a full-history `SUM`. Needs snapshot + delta first |
+| Thousands of merchants | Fine - keyset pagination and batched ids bound every response |
+| Millions of customers | Fine - a customer is not an entity here; only event volume matters |
+
+Writes and reports scale differently: the report path breaks first, and it is
+not covered by the events/day table above.
 
 ## Decisions before production
 

@@ -16,10 +16,11 @@ import java.util.UUID
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import org.example.randomUuid
 
 class PayoutJobsTest {
 
-    private val merchant = UUID.randomUUID()
+    private val merchant = randomUuid()
     private val date = LocalDate.of(2026, 9, 25)
 
     @Test
@@ -62,7 +63,7 @@ class PayoutJobsTest {
     @Test
     fun `merchant balances are processed in bounded pages`() = runBlocking {
         val balances = List(5) {
-            MerchantBalance(UUID.randomUUID(), "Merchant $it", BigDecimal("10.00"), 1)
+            MerchantBalance(randomUuid(), "Merchant $it", BigDecimal("10.00"), 1)
         }
         val store = FakePayoutStore(balances = balances)
 

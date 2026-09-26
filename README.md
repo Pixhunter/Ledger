@@ -111,7 +111,9 @@ merchantNet = 97.00  -> owed to merchant
 
 ## Architecture
 
-Two independent flows plus one read endpoint.
+Two PSP-driven write flows (capture, refund), two scheduled settlement flows
+(daily merchant payout, monthly tax remittance), and two read endpoints
+(tax balance, merchant balances).
 
 ![Ledger services and daily balance processing](docs/images/service-architecture.svg)
 
@@ -184,9 +186,12 @@ sequenceDiagram
 sequenceDiagram
     participant C as Finance client
     participant L as Ledger service
-    C->>L: GET /v1/balances
-    L->>L: sum entries by account
-    L-->>C: tax owed per country, merchant balances (available / held)
+    C->>L: GET /v1/balances/tax?country=ES&from&to
+    L->>L: sum TAX entries for the country in the window
+    L-->>C: owedAtStart / movement / owedAtEnd
+    C->>L: GET /v1/balances/merchants?merchantId&date&after&limit
+    L->>L: sum MERCHANT and HELD entries up to asOf, one keyset page
+    L-->>C: available / held per merchant, nextCursor
 ```
 
 ### States
@@ -234,7 +239,7 @@ calls the PSP, the PSP returns the money to the customer's card, then the
 PSP calls the ledger. By then the money is already gone, so the ledger
 never declines a refund.
 
-- **One endpoint**: the PSP calls `POST /v1/payments/refund`. Same pattern
+- **One endpoint**: the PSP calls `POST /v1/payment/refund`. Same pattern
   as capture: signature, schema, idempotency, one database round trip.
 - **Full and partial refunds.** One payment can have many refunds; a full
   refund is simply a partial refund of 100%.
@@ -245,7 +250,7 @@ never declines a refund.
 ### API
 
 ```
-POST /v1/payments/refund
+POST /v1/payment/refund
 Header: X-Signature   HMAC of the raw body, PSP shared secret
 ```
 
@@ -290,10 +295,9 @@ Responses:
 | 5xx | database down, timeout | PSP retries |
 
 Queued for review: malformed body, same `refundReference` with a different
-body, amount more than left to refund, currency differs,
-`refundedAt` date after today or before the capture date. A PSP retry
-cannot fix these, so we answer 200 to stop pointless retries and keep the
-event for a human.
+body, amount more than left to refund, currency differs, `refundedAt` before
+the capture or more than 2 days ahead of now. A PSP retry cannot fix these, so
+we answer 200 to stop pointless retries and keep the event for a human.
 
 `reason` must come from our side (the MoR's refund service, via PSP
 metadata), never typed by the merchant. Stripe's own refund reasons
@@ -323,12 +327,12 @@ sequenceDiagram
     participant DB as Database
     participant R as Review + alerts
 
-    PSP->>L: POST /v1/payments/refund
+    PSP->>L: POST /v1/payment/refund
     L->>L: verify signature
     alt bad signature
         L-->>PSP: 401 (nothing saved)
     end
-    L->>L: validate schema<br/>required fields, amount > 0,<br/>currency format, refundedAt date <= today
+    L->>L: validate schema<br/>required fields, amount > 0,<br/>currency format, refundedAt <= now + 2d
     alt malformed
         L->>DB: save processing_error (MALFORMED)
         L--)R: alert
@@ -354,7 +358,7 @@ sequenceDiagram
     end
 
     L->>L: validate against payment
-    alt currency differs / refundedAt date before capture date
+    alt currency differs / refundedAt before capture
         L->>DB: save processing_error (CURRENCY_MISMATCH / INVALID_DATE)
         L--)R: alert
         L-->>PSP: 200 QUEUED_FOR_REVIEW
@@ -375,14 +379,21 @@ sequenceDiagram
     end
 ```
 
-**Date checks compare days, not timestamps** (UTC dates):
+**Date checks compare instants**, against a bounded future window:
 
-- `refundedAt` date >= `capturedAt` date: same day is fine, a refund dated
-  before its payment's day is impossible -> error table.
-- `refundedAt` date <= today -> otherwise error table.
-- Both times come from the PSP, so clock skew is tiny; comparing days avoids
-  false rejections from seconds of skew. Rare edge left: capture 00:00:01,
-  refund stamped 23:59:59 the previous day. Accepted.
+- `refundedAt >= paymentTime`. A refund before its own sale is impossible ->
+  error table.
+- `refundedAt <= now + 2 days` (`RefundService.MAX_FUTURE_DRIFT`). Not zero:
+  `refundedAt` is the PSP's clock, and a PSP that batches a day's refunds
+  overnight legitimately stamps them slightly ahead of ours. Two days absorbs
+  skew and batching without letting a bad feed move tax out of the period -
+  `refundedAt` is the tax point, so a refund dated next month would reduce
+  next month's return instead of this one.
+- Anything outside the window is `INVALID_DATE` in the error table, not a
+  rejection to the PSP.
+- Captures are looser: `PaymentService.MAX_DATE_DRIFT` is 7 days either way
+  and only raises a warning, because a capture that is merely mis-dated is
+  still money received. Refunds are hard-checked because they move tax out.
 
 **Database trips:** capture needs one; refund needs three (retry lookup,
 payment lookup, final statement) because it validates against stored data
@@ -619,8 +630,8 @@ balances and tax are off by that amount until resolved. Mitigation:
 
 ### Production (not implemented)
 
-- Metrics (Prometheus) and dashboards (Grafana): errors per code, open
-  errors, age of the oldest open error; alert rules per code.
+- Metrics, dashboards and alert rules per code - the full signal list is in
+  [Production TODOs](#production-todos-documented-not-implemented) #6.
 - Automatic resolution for simple cases (e.g. auto-replay after a mapping
   fix), a review UI, replay button.
 
@@ -1068,35 +1079,164 @@ Design notes:
 - Payout is only **computed**. Sending money to the merchant's bank is a
   separate integration (status SENT / CONFIRMED).
 
-## Operational concerns (documented, not implemented)
+## Production TODOs (documented, not implemented)
 
-- **Negative balance**: refunds exceed sales -> no payout, balance carried forward.
-- **HELD release**: admin action to release or refund held payments.
-- **Daily reconciliation**: compare our captured total with the PSP
-  settlement report. Primary control of any MoR; mismatches alert.
-- **Chargebacks**: customer disputes with their bank. Separate flow.
-- **Actual money transfer**: payout job only computes; sending money to
-  the merchant's bank is a separate integration.
+What a real MoR needs before it holds other people's money. Ordered by what
+loses money first if it is missing.
+
+### 1. Database durability
+
+Single Postgres, no replica, no backup. The ledger is the only copy of who is
+owed what, so this is the largest single risk in the repo.
+
+- Streaming replication with automatic failover (Patroni or a managed
+  service), WAL archiving and point-in-time recovery.
+- Targets to design against: **RPO <= 1 min, RTO <= 5 min**.
+- Nuance: for captures, RPO is partly covered for free - the PSP retries for
+  days and idempotency absorbs the replay. Payouts and tax remittances already
+  sent to a bank are *not* recoverable by retry, so those tables need the
+  tighter guarantee, and reconciliation is what detects the gap.
+- Restore has to be rehearsed, not assumed. A backup nobody has restored is
+  not a backup.
+
+### 2. PSP daily reconciliation
+
+The primary control of any MoR. Compare the PSP settlement file against our
+`payment` and `refund` totals per day and per currency, and alert on any
+difference. Catches missed webhooks, silently dropped events, PSP-side
+adjustments and our own bugs - none of which the service can detect on its
+own today, because it only ever sees what the PSP chose to send.
+
+### 3. Auth and RBAC for the reports
+
+`/v1/balances/*` are open. They expose every merchant's balance and the tax
+position of the whole business.
+
+- The PSP webhooks are HMAC-signed; the reports need their own scheme
+  (mTLS or OIDC for the finance client).
+- Roles: finance reads all, a merchant reads only its own `merchantId`,
+  operations releases `HELD`. Enforced server-side, not by the caller passing
+  a filter.
+- Read access to balances is audit-logged.
+
+### 4. Report hardening
+
+Keyset pagination and page limits are implemented (`after` / `limit`,
+max 500; at most 100 `merchantId` per call). Still missing:
+
+- Per-client rate limits on the report endpoints. The capture webhook can
+  shed load with 429/503 because the PSP retries; a report client cannot be
+  allowed to saturate the pool in the first place.
+- A statement timeout tuned separately for reports, so one wide query cannot
+  hold a connection for the whole pool's benefit.
+
+### 5. Snapshots plus deltas
+
+`merchant_daily_balance` exists and a dated query reads it directly. The live
+balance still sums the whole ledger for a merchant.
+
+- Extend the nightly close to tax accounts as well as merchants.
+- Answer a live balance as **last snapshot + entries since**, not a full sum.
+  Below ~100M entries the full sum is fine; this is the fix when it is not.
+
+### 6. Metrics and alerts
+
+Nothing is exported today. The minimum set:
+
+| Signal | Alert when | Why |
+|---|---|---|
+| Ledger imbalance: `SUM(amount)` per transaction | `<> 0`, ever | Double entry is broken. Page immediately. |
+| `processing_error` open rows | count > 0, and age of the oldest row | The quarantine is a work queue; an old row is unrecovered money. |
+| `IDEMPOTENCY_CONFLICT` rate | any sustained rate | The PSP is replaying a reference with a different body. |
+| Payout / remittance stuck in `COMPUTED` | older than one cycle | Money computed but never sent. |
+| DB saturation: connection pool wait, replication lag, oldest transaction age | pool near capacity, lag > 30s | Precedes every outage this design can have. |
+| Capture latency p99, 5xx rate | above SLO | PSP-visible health. |
+
+### 7. Append-only enforced by the database
+
+`ledger_entry` is append-only by convention. The application role should not
+be able to violate it: `REVOKE UPDATE, DELETE ON mor.ledger_entry`, and a
+separate migration role that owns DDL. Today a bug or a console session can
+rewrite history silently.
+
+### 8. Outbox for anything leaving the process
+
+Alerts are log lines, and payout and remittance calls go out inline. A crash
+between the database commit and the external call loses the alert or leaves
+the transfer in an unknown state.
+
+- Write the intent to an `outbox` table in the same transaction as the
+  ledger write, and have a relay deliver it at least once.
+- The receiving side must be idempotent - which is exactly what the payout
+  and remittance keys already provide.
+
+### 9. Chargebacks and failed reversals
+
+- **Chargebacks**: the bank claws money back after the fact, with a fee, and
+  it is not a refund - the tax treatment and the merchant liability differ.
+  Separate flow and separate `LedgerTransactionType`.
+- **Failed payouts and remittances**: today the mock PSP always succeeds. A
+  real one rejects, returns money days later, or partially settles. Needs a
+  reversal that puts the amount back on the merchant balance and an alert,
+  not a silent retry.
+- **Negative balance**: implemented as carry-forward with an alert after 14
+  days; collection itself is out of scope.
+
+### 10. Manual workflows with an audit trail
+
+`HELD` funds and `SUSPENSE` (over-refund excess) accumulate and nothing can
+clear them.
+
+- An operations endpoint to release `HELD` once the merchant is known, and to
+  resolve a `SUSPENSE` balance to a decision.
+- Every such action recorded with actor, timestamp, reason and the resulting
+  ledger transaction. A human moving money must leave a trail as strong as
+  the machine's.
+- Resolving a `processing_error` row deletes it, so the audit trail for that
+  decision has to live somewhere else.
 
 ## Scalability
+
+**No load test has been run against this service.** Every figure below is a
+**design target** - reasoned from Postgres behaviour and the number of rows
+each request touches - not a measurement. They are useful for deciding what to
+build next; they are not evidence of what the service does. Nothing here
+becomes a claim until k6 or `pgbench` against the real schema says so.
+
+### Load verdict
+
+| Load | Verdict | Reasoning |
+|---|---|---|
+| 100 writes/s | **Realistic** | A capture is one transaction writing ~6 rows. Comfortably inside a single Postgres writer. |
+| 1,000 writes/s | **Plausible, unproven** | Needs suitable infrastructure - NVMe, tuned WAL and checkpoints, a pooled connection count that matches cores - plus 2-4 app instances. Nothing measured supports it. |
+| 1,000 balance reports/s | **Not realistic today** | A live merchant balance is a full-history `SUM` over `ledger_entry`, and cost grows with the ledger. Snapshot + delta ([Production TODOs](#production-todos-documented-not-implemented) #5) is the prerequisite; re-measure after. |
+| Thousands of merchants | **Fine** | Keyset pagination and batched ids bound every response. Cost is per page, not per merchant. |
+| Millions of customers | **Fine** | A customer is not an entity in this schema. Transaction volume is what matters, not customer count. |
+
+### Payment volume
 
 Load is measured in **payments per second**, not customers.
 Black Friday peak is assumed ~10x the daily average.
 
-| Payments/day | Avg / peak TPS | Current design | What breaks | Fix |
+| Payments/day | Avg / peak TPS | Status | What breaks first | Fix |
 |---|---|---|---|---|
-| 1M | 12 / 120 | works as is | nothing | - |
-| 10M | 120 / 1.2k | works | DB connections | connection pool, 2-4 app instances |
+| 1M | 12 / 120 | design target, unmeasured | nothing expected | - |
+| 10M | 120 / 1.2k | design target, unmeasured | DB connections | connection pool, 2-4 app instances |
 | 100M | 1.2k / 12k | needs changes | single DB writer; hot accounts (e.g. tax DE); report sums slow; nightly job too heavy | shard by merchant; balance snapshots; job per shard in parallel |
 | 1B+ | 12k / 120k+ | redesign | sync posting cannot absorb spikes; idempotency data ~1B rows/day | durable queue in front (ack after enqueue, post async); purpose-built ledger DB; idempotency partitioned by day, dropped after 30 days; multi-region |
+
+The 1.2k peak in the 10M row is the one to be most careful with: it is the
+threshold where "plausible" turns into "must be proven", and it has not been.
 
 ### Bottlenecks, in the order they hit
 
 1. **Hot accounts.** Every German sale touches "tax owed to DE"; a big
    merchant touches its own balance. Row updates lock at ~500-1k/s.
    Solved by append-only entries; further by splitting an account into N sub-accounts.
-2. **Balance report.** Summing all entries gets slow after ~100M entries.
-   Periodic balance snapshots, then sum only entries after the snapshot.
+2. **Balance report.** The live merchant balance sums a merchant's whole
+   history, so its cost grows with the ledger and it is the first thing to
+   fall over under report load - well before the write path does. Periodic
+   snapshots, then sum only entries after the snapshot.
 3. **Single DB writer.** ~5-10k writes/s. Shard by merchant; tax accounts
    exist per shard, report aggregates across shards.
 4. **Idempotency storage.** Grows with every payment. Partition by day,
@@ -1106,7 +1246,8 @@ Black Friday peak is assumed ~10x the daily average.
 
 ### Growth over the years
 
-- Year 1 (up to ~10M/day): single Postgres, 2-4 stateless app instances. Current design.
+- Year 1 (up to ~10M/day): single Postgres, 2-4 stateless app instances.
+  Current design - target, not measured.
 - Growth (~100M/day): snapshots, sharding, read replica for reports.
 - Global (1B+/day): queue-buffered ingest, dedicated ledger engine, multi-region.
 
@@ -1118,10 +1259,13 @@ deliberately for the current load.
 
 - Capture webhook: no per-customer limit. Under overload return **429/503**:
   safe, the PSP retries for days, nothing is lost.
-- Balances report: normal rate limit per client.
+- Balances report: needs a per-client rate limit, and it is the endpoint that
+  needs one most - a report is far more expensive than a capture, and the
+  caller does not retry harmlessly the way a PSP does.
 
 ### Availability
 
 - Answer 200 only after the transaction commits.
 - PSP retries + idempotency cover our downtime.
-- Database is the single point of failure: replica with automatic failover (not implemented).
+- Database is the single point of failure. Replica, failover and PITR targets
+  are in [Production TODOs](#production-todos-documented-not-implemented) #1.

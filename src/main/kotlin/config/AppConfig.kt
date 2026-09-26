@@ -6,6 +6,7 @@ import com.fasterxml.jackson.dataformat.yaml.YAMLFactory
 import com.fasterxml.jackson.module.kotlin.readValue
 import com.fasterxml.jackson.module.kotlin.registerKotlinModule
 import java.io.File
+import org.example.Constants.Config.DEFAULT_PATH
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class AppConfig(
@@ -15,7 +16,6 @@ data class AppConfig(
     val psp: PspConfig = PspConfig(),
 ) {
     companion object {
-        private const val DEFAULT_PATH = "config/application.yaml"
 
         private val yaml: ObjectMapper = ObjectMapper(YAMLFactory()).registerKotlinModule()
 

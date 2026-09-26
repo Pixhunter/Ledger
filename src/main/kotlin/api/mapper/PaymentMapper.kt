@@ -6,15 +6,13 @@ import org.example.model.Money
 import org.example.toCountry
 import org.example.toInstant
 import org.example.toUuid
+import org.example.Constants
 
 object PaymentMapper {
 
-    private val PSP_REF = Regex("^[A-Za-z0-9_-]{1,64}$")
-    private val VAT_ID = Regex("^[A-Z]{2}[A-Za-z0-9]{2,13}$")
-
     /** @throws IllegalArgumentException -> 400 INVALID_REQUEST */
     fun PaymentRequestDto.toModel(): PaymentModel {
-        require(PSP_REF.matches(pspReference)) {
+        require(Constants.Api.EXTERNAL_REFERENCE.matches(pspReference)) {
             "pspReference must be 1-64 chars of [A-Za-z0-9_-], was '${pspReference}'"
         }
         require(amount.signum() > 0) { "amount must be positive, was ${amount}" }
@@ -22,7 +20,7 @@ object PaymentMapper {
         val domainCurrency = currency.toDomain()
 
         customerVatId?.let {
-            require(VAT_ID.matches(it)) { "customerVatId is malformed: '$it'" }
+            require(Constants.Api.VAT_ID.matches(it)) { "customerVatId is malformed: '$it'" }
         }
 
         return PaymentModel(

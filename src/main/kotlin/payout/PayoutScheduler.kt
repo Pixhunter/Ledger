@@ -12,6 +12,7 @@ import java.time.Duration
 import java.time.LocalTime
 import java.time.ZoneId
 import java.time.ZonedDateTime
+import org.example.Constants
 
 /**
  * Closing the day and moving the money are an hour apart on purpose: if the
@@ -29,29 +30,29 @@ class PayoutScheduler(
     private val taxCalculation: TaxRemittanceCalculationJob,
     private val taxDisbursement: TaxRemittanceDisbursementJob,
     private val taxMonitor: TaxBalanceMonitorJob,
-    private val zone: ZoneId = ZoneId.of("Europe/London"),
+    private val zone: ZoneId = Constants.Jobs.REPORTING_ZONE,
 ) {
     private val log = LoggerFactory.getLogger(PayoutScheduler::class.java)
 
     fun start(scope: CoroutineScope) {
-        scope.daily(CALCULATION_AT) {
+        scope.daily(Constants.Jobs.PAYOUT_CALCULATION_AT) {
             val businessDate = ZonedDateTime.now(zone).toLocalDate().minusDays(1)
             calculation.run(businessDate)
         }
 
-        scope.daily(DISBURSEMENT_AT) { disbursement.run() }
+        scope.daily(Constants.Jobs.PAYOUT_DISBURSEMENT_AT) { disbursement.run() }
 
-        scope.daily(TAX_MONITOR_AT) { taxMonitor.run(ZonedDateTime.now(zone).toLocalDate()) }
+        scope.daily(Constants.Jobs.TAX_MONITOR_AT) { taxMonitor.run(ZonedDateTime.now(zone).toLocalDate()) }
 
         // Tax is filed per country per month, on the 5th for the month before:
         // late refunds have a few days to land before the return is fixed.
         // Checked daily so a restart on the 6th does not skip a period.
-        scope.daily(TAX_CALCULATION_AT) {
+        scope.daily(Constants.Jobs.TAX_CALCULATION_AT) {
             val today = ZonedDateTime.now(zone).toLocalDate()
-            if (today.dayOfMonth == FILING_DAY) taxCalculation.run(today.minusMonths(1).withDayOfMonth(1))
+            if (today.dayOfMonth == Constants.Jobs.TAX_FILING_DAY) taxCalculation.run(today.minusMonths(1).withDayOfMonth(1))
         }
 
-        scope.daily(TAX_DISBURSEMENT_AT) { taxDisbursement.run() }
+        scope.daily(Constants.Jobs.TAX_DISBURSEMENT_AT) { taxDisbursement.run() }
     }
 
     private fun CoroutineScope.daily(at: LocalTime, block: suspend () -> Unit) = launch {
@@ -67,12 +68,4 @@ class PayoutScheduler(
         return Duration.between(now, if (today.isAfter(now)) today else today.plusDays(1))
     }
 
-    private companion object {
-        val CALCULATION_AT: LocalTime = LocalTime.MIDNIGHT
-        val DISBURSEMENT_AT: LocalTime = LocalTime.of(1, 0)
-        const val FILING_DAY = 5
-        val TAX_MONITOR_AT: LocalTime = LocalTime.of(1, 30)
-        val TAX_CALCULATION_AT: LocalTime = LocalTime.of(2, 0)
-        val TAX_DISBURSEMENT_AT: LocalTime = LocalTime.of(3, 0)
-    }
 }

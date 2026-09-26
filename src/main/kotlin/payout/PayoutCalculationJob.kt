@@ -11,6 +11,8 @@ import java.math.BigDecimal
 import java.time.LocalDate
 import java.time.ZoneId
 import java.util.UUID
+import org.example.Constants
+import org.example.randomUuid
 
 /**
  * Closes the day: snapshots every merchant's balance, then turns the positive
@@ -18,22 +20,22 @@ import java.util.UUID
  * (merchant, date) key makes a second run a no-op.
  *
  * A negative balance is carried forward, not paid: future sales settle it.
- * After NEGATIVE_DAYS_LIMIT days in the red it stops being a rounding artefact
+ * After MERCHANT_NEGATIVE_DAYS_LIMIT days in the red it stops being a rounding artefact
  * and becomes a debt someone has to collect, so it goes to the review queue.
  */
 class PayoutCalculationJob(
     private val payouts: PayoutStore,
     private val errors: ProcessingErrorStore,
-    private val negativeDaysLimit: Int = NEGATIVE_DAYS_LIMIT,
-    private val retryAttempts: Int = 3,
-    private val retryDelayMs: Long = 100,
-    private val batchSize: Int = 500,
-    private val reportingZone: ZoneId = ZoneId.of("Europe/London"),
+    private val negativeDaysLimit: Int = Constants.Jobs.MERCHANT_NEGATIVE_DAYS_LIMIT,
+    private val retryAttempts: Int = Constants.Jobs.RETRY_ATTEMPTS,
+    private val retryDelayMs: Long = Constants.Jobs.RETRY_DELAY_MS,
+    private val batchSize: Int = Constants.Jobs.BATCH_SIZE,
+    private val reportingZone: ZoneId = Constants.Jobs.REPORTING_ZONE,
 ) {
     private val log = LoggerFactory.getLogger(PayoutCalculationJob::class.java)
 
     suspend fun run(payoutDate: LocalDate): List<MerchantBalance> {
-        require(batchSize in 1..1000)
+        require(batchSize in 1..Constants.Jobs.MAX_BATCH_SIZE)
         val computed = mutableListOf<MerchantBalance>()
         val failures = mutableListOf<Throwable>()
         var cursor: UUID? = null
@@ -105,7 +107,7 @@ class PayoutCalculationJob(
         if (days < negativeDaysLimit) return null
 
         return ProcessingError(
-            id = UUID.randomUUID(),
+            id = randomUuid(),
             eventType = EventType.PAYOUT,
             externalReference = "$merchantId-$payoutDate",
             payload = """{"merchantId":"$merchantId","balance":"$balance","negativeDays":$days}""",
@@ -135,7 +137,4 @@ class PayoutCalculationJob(
     private class PayoutCalculationFailed(date: LocalDate, failures: List<Throwable>) :
         RuntimeException("payout calculation $date failed for ${failures.size} operation(s)", failures.first())
 
-    private companion object {
-        const val NEGATIVE_DAYS_LIMIT = 14
-    }
 }

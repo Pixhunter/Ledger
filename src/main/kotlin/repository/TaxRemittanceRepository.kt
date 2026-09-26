@@ -16,26 +16,39 @@ import org.example.remittance.TaxRemittanceStore
 import org.jooq.DSLContext
 import org.jooq.impl.DSL
 import java.math.BigDecimal
+import java.time.Instant
 import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
-import java.util.UUID
+import org.example.Constants
+import org.example.randomUuid
 
 class TaxRemittanceRepository(private val dsl: DSLContext) : TaxRemittanceStore {
 
-    // Entries are signed: tax owed is a credit, so the liability is the negated sum.
-    override suspend fun liabilities(): List<TaxLiability> = io {
+    /**
+     * Entries are signed: tax owed is a credit, so the liability is the
+     * negated sum. Bounded three ways - unsettled only, PAYOUT transactions
+     * excluded, and tax point before the cutoff - so a sale dated after the
+     * period cannot land in the period's return, and a period already filed
+     * cannot be filed again.
+     */
+    override suspend fun liabilities(cutoff: Instant): List<TaxLiability> = io {
+        val at = cutoff.atOffset(ZoneOffset.UTC)
         dsl.resultQuery(
             """
             WITH balances AS (
-                SELECT purpose_key, -sum(amount) AS amount
-                FROM mor.ledger_entry
-                WHERE purpose = ? AND currency = ? AND purpose_key IS NOT NULL
-                GROUP BY purpose_key
+                SELECT le.purpose_key, -sum(le.amount) AS amount
+                FROM mor.ledger_entry le
+                JOIN mor.ledger_transaction lt ON lt.id = le.transaction_id
+                WHERE le.purpose = ? AND le.currency = ? AND le.purpose_key IS NOT NULL
+                  AND le.settled_by_transaction_id IS NULL
+                  AND lt.type <> ${LedgerTransactionType.PAYOUT.id}
+                  AND le.occurred_at < CAST(? AS timestamptz)
+                GROUP BY le.purpose_key
             ), payment_stats AS (
                 SELECT tax_country, count(*) AS payment_count, max(tax_rate_bps) AS max_rate_bps
                 FROM mor.payment
-                WHERE tax_country IS NOT NULL
+                WHERE tax_country IS NOT NULL AND payment_time < CAST(? AS timestamptz)
                 GROUP BY tax_country
             )
             SELECT b.purpose_key AS country,
@@ -44,7 +57,8 @@ class TaxRemittanceRepository(private val dsl: DSLContext) : TaxRemittanceStore 
                    COALESCE(s.max_rate_bps, 0) AS max_rate_bps
             FROM balances b
             LEFT JOIN payment_stats s ON s.tax_country = b.purpose_key
-            """.trimIndent(), PaymentPurpose.TAX.id, Currency.EUR.name,
+            """.trimIndent(),
+            PaymentPurpose.TAX.id, Currency.EUR.name, at, at,
         ).fetch().map { row ->
             val rateBps = row.get("max_rate_bps", Int::class.java) ?: 0
             TaxLiability(
@@ -87,26 +101,55 @@ class TaxRemittanceRepository(private val dsl: DSLContext) : TaxRemittanceStore 
                   FROM mor.tax_daily_balance x
                   WHERE x.country = ? AND x.balance_date <= ? AND x.balance >= 0
               ), DATE '-infinity')
-            """.trimIndent(), country, balanceDate, country, balanceDate,
+            """.trimIndent(),
+            country, balanceDate, country, balanceDate,
         ).fetchOne(0, Int::class.java) ?: 0
     }
 
-    override suspend fun computeRemittance(liability: TaxLiability, periodStart: LocalDate): Boolean = io {
+    override suspend fun computeRemittance(
+        country: String,
+        periodStart: LocalDate,
+        cutoff: Instant,
+    ): BigDecimal? = io {
         runCatching {
             dsl.transactionResult { cfg ->
                 val db = DSL.using(cfg)
-                val transactionId = UUID.randomUUID()
+                val transactionId = randomUuid()
                 val now = OffsetDateTime.now(ZoneOffset.UTC)
-                val amount = liability.amount.takeIf { it.signum() > 0 }
-                    ?: return@transactionResult false
 
                 db.insertInto(LEDGER_TRANSACTION)
                     .set(LEDGER_TRANSACTION.ID, transactionId)
                     .set(LEDGER_TRANSACTION.TYPE, LedgerTransactionType.PAYOUT.id)
                     .execute()
 
+                // Settling and summing in one statement is what bounds the
+                // filing: the rows this return covers are exactly the rows it
+                // is worth, with no window for an entry to fall between.
+                val amount = db.resultQuery(
+                    """
+                    WITH settled AS (
+                        UPDATE mor.ledger_entry le
+                        SET settled_by_transaction_id = ?
+                        FROM mor.ledger_transaction lt
+                        WHERE lt.id = le.transaction_id
+                          AND le.purpose = ? AND le.purpose_key = ? AND le.currency = ?
+                          AND le.settled_by_transaction_id IS NULL
+                          AND lt.type <> ${LedgerTransactionType.PAYOUT.id}
+                          AND le.occurred_at < CAST(? AS timestamptz)
+                        RETURNING le.amount
+                    )
+                    SELECT COALESCE(-sum(amount), 0) FROM settled
+                    """.trimIndent(),
+                    transactionId, PaymentPurpose.TAX.id, country, Currency.EUR.name,
+                    cutoff.atOffset(ZoneOffset.UTC),
+                ).fetchSingle(0, BigDecimal::class.java)
+
+                // Nothing owed, or a credit carried forward: roll back, which
+                // also undoes the settle, so the credit stays available.
+                if (amount == null || amount.signum() <= 0) throw NothingToFile()
+
                 val claimed = db.insertInto(TAX_REMITTANCE)
-                    .set(TAX_REMITTANCE.COUNTRY, liability.country)
+                    .set(TAX_REMITTANCE.COUNTRY, country)
                     .set(TAX_REMITTANCE.PERIOD_START, periodStart)
                     .set(TAX_REMITTANCE.AMOUNT, amount)
                     .set(TAX_REMITTANCE.CURRENCY, Currency.EUR.name)
@@ -129,7 +172,7 @@ class TaxRemittanceRepository(private val dsl: DSLContext) : TaxRemittanceStore 
                 )
                     .values(
                         transactionId, PaymentPurpose.TAX.id,
-                        liability.country, amount, Currency.EUR.name, now,
+                        country, amount, Currency.EUR.name, now,
                     )
                     .values(
                         transactionId, PaymentPurpose.PSP.id,
@@ -137,20 +180,21 @@ class TaxRemittanceRepository(private val dsl: DSLContext) : TaxRemittanceStore 
                     )
                     .execute()
 
-                true
+                amount
             }
-        }.getOrElse { e -> if (e is AlreadyFiled) false else throw e }
+        }.getOrElse { e -> if (e is AlreadyFiled || e is NothingToFile) null else throw e }
     }
 
     override suspend fun due(status: PayoutStatus, limit: Int): List<DueRemittance> = io {
-        require(limit in 1..1000)
-        dsl.transactionResult { cfg -> DSL.using(cfg).resultQuery(
-            """
+        require(limit in 1..Constants.Jobs.MAX_BATCH_SIZE)
+        dsl.transactionResult { cfg ->
+            DSL.using(cfg).resultQuery(
+                """
             WITH candidates AS (
                 SELECT country, period_start
                 FROM mor.tax_remittance
                 WHERE status = ?
-                   OR (status = ? AND claimed_at < now() - interval '5 minutes')
+                   OR (status = ? AND claimed_at < now() - make_interval(mins => ${Constants.Jobs.CLAIM_TIMEOUT_MINUTES}))
                 ORDER BY period_start, country
                 FOR UPDATE SKIP LOCKED
                 LIMIT ?
@@ -161,14 +205,15 @@ class TaxRemittanceRepository(private val dsl: DSLContext) : TaxRemittanceStore 
             WHERE r.country = c.country AND r.period_start = c.period_start
             RETURNING r.country, r.period_start, r.amount
             """.trimIndent(),
-            status.id, PayoutStatus.PROCESSING.id, limit, PayoutStatus.PROCESSING.id,
-        ).fetch().map { row ->
-            DueRemittance(
-                row.get(0, String::class.java)!!,
-                row.get(1, LocalDate::class.java)!!,
-                row.get(2, BigDecimal::class.java)!!,
-            )
-        } }
+                status.id, PayoutStatus.PROCESSING.id, limit, PayoutStatus.PROCESSING.id,
+            ).fetch().map { row ->
+                DueRemittance(
+                    row.get(0, String::class.java)!!,
+                    row.get(1, LocalDate::class.java)!!,
+                    row.get(2, BigDecimal::class.java)!!,
+                )
+            }
+        }
     }
 
     override suspend fun markSent(country: String, periodStart: LocalDate, reference: String): Unit = io {
@@ -197,4 +242,6 @@ class TaxRemittanceRepository(private val dsl: DSLContext) : TaxRemittanceStore 
     }
 
     private class AlreadyFiled : RuntimeException()
+
+    private class NothingToFile : RuntimeException()
 }

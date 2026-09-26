@@ -129,7 +129,7 @@ class TaxJobsTest {
         val computed = mutableListOf<Pair<String, BigDecimal>>()
         val sent = mutableListOf<Pair<String, LocalDate>>()
 
-        override suspend fun liabilities() = liabilities
+        override suspend fun liabilities(cutoff: java.time.Instant) = liabilities
         override suspend fun recordDailyBalances(
             liabilities: List<TaxLiability>,
             balanceDate: LocalDate,
@@ -139,10 +139,15 @@ class TaxJobsTest {
 
         override suspend fun consecutiveNegativeDays(country: String, balanceDate: LocalDate) = negativeDays
 
-        override suspend fun computeRemittance(liability: TaxLiability, periodStart: LocalDate): Boolean {
-            if (alreadyFiled) return false
-            computed += liability.country to liability.amount
-            return true
+        override suspend fun computeRemittance(
+            country: String,
+            periodStart: LocalDate,
+            cutoff: java.time.Instant,
+        ): java.math.BigDecimal? {
+            if (alreadyFiled) return null
+            val amount = liabilities.single { it.country == country }.amount
+            computed += country to amount
+            return amount
         }
 
         override suspend fun due(status: PayoutStatus, limit: Int) = due.take(limit)

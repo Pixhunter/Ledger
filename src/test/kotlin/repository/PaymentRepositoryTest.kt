@@ -29,10 +29,11 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import org.example.randomUuid
 
 class PaymentRepositoryTest : PostgresTest() {
 
-    private val merchantId = UUID.randomUUID()
+    private val merchantId = randomUuid()
     private val paymentTime = Instant.parse("2026-09-22T10:15:30Z")
     private val repository by lazy { PaymentRepository(dsl) }
 
@@ -85,7 +86,7 @@ class PaymentRepositoryTest : PostgresTest() {
     @Test
     fun `the same psp reference is stored once however many times it arrives`() {
         val first = posted()
-        val second = posted(id = UUID.randomUUID())
+        val second = posted(id = randomUuid())
 
         val firstOutcome = runBlocking { repository.insert(first, entries(first)) }
         val secondOutcome = runBlocking { repository.insert(second, entries(second)) }
@@ -126,7 +127,7 @@ class PaymentRepositoryTest : PostgresTest() {
     fun `processing error failure rolls back the held payment and ledger`() {
         val payment = held()
         val error = ProcessingError(
-            id = UUID.randomUUID(),
+            id = randomUuid(),
             eventType = EventType.CAPTURE,
             externalReference = payment.pspReference,
             payload = "not-json",
@@ -153,7 +154,7 @@ class PaymentRepositoryTest : PostgresTest() {
     private fun amountFor(purpose: PaymentPurpose): BigDecimal =
         storedEntries().filter { it.first == purpose }.sumOf { it.second }
 
-    private fun posted(id: UUID = UUID.randomUUID()) = PaymentEntity(
+    private fun posted(id: UUID = randomUuid()) = PaymentEntity(
         id = id,
         pspReference = "psp-1",
         merchantId = merchantId,

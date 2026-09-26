@@ -4,10 +4,10 @@ import org.example.model.Money
 import org.example.model.enums.Currency
 import java.math.BigDecimal
 import java.math.RoundingMode
+import org.example.Constants
 
 object TaxCalculator {
 
-    private val TEN_THOUSAND = BigDecimal("10000")
 
     fun tax(
         gross: BigDecimal,
@@ -20,14 +20,14 @@ object TaxCalculator {
 
         val rateDecimal = BigDecimal.valueOf(rate.value.toLong())
         val exact = gross.multiply(rateDecimal)
-            .divide(TEN_THOUSAND.add(rateDecimal), Money.STORAGE_SCALE + 8, RoundingMode.HALF_EVEN)
+            .divide(Constants.Amounts.TEN_THOUSAND.add(rateDecimal), Constants.Amounts.DIVISION_SCALE, RoundingMode.HALF_EVEN)
         return Money.calculated(exact, currency)
     }
 
     fun fee(net: BigDecimal, rate: BasisPoints, currency: Currency): BigDecimal {
         require(net.signum() >= 0) { "net must not be negative, was $net" }
         val exact = net.multiply(BigDecimal.valueOf(rate.value.toLong()))
-            .divide(TEN_THOUSAND, Money.STORAGE_SCALE + 8, RoundingMode.HALF_EVEN)
+            .divide(Constants.Amounts.TEN_THOUSAND, Constants.Amounts.DIVISION_SCALE, RoundingMode.HALF_EVEN)
         return Money.calculated(exact, currency)
     }
 }

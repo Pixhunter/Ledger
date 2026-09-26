@@ -97,7 +97,11 @@ components:
         reason:
           $ref: '#/components/schemas/RefundReason'
         refundedAt:
-          description: When the PSP refunded. Decides the period the tax is reduced in.
+          description: |
+            When the PSP refunded. Decides the period the tax is reduced in, so
+            it must be at or after the capture's `paymentTime` and no more than
+            2 days ahead of now. Outside that window the refund is queued for
+            review as `INVALID_DATE` and nothing is booked.
           type: string
           format: date-time
 
@@ -141,7 +145,7 @@ components:
 
     MerchantBalances:
       type: object
-      required: [ currency, asOf, merchants ]
+      required: [ currency, asOf, limit, merchants ]
       properties:
         currency:
           $ref: '#/components/schemas/Currency'
@@ -150,8 +154,18 @@ components:
           type: string
           format: date
         asOf:
+          description: Cutoff the live balance was summed to.
           type: string
           format: date-time
+        limit:
+          description: Page size actually applied.
+          type: integer
+        nextCursor:
+          description: |
+            Pass back as `after` to fetch the next page. Null on the last page.
+          type: string
+          format: uuid
+          nullable: true
         merchants:
           type: array
           items:

@@ -67,8 +67,8 @@ dependencies {
     openApiGenerator("org.openapitools:openapi-generator-cli:$openApiGeneratorVersion")
 }
 
-// Generated jOOQ classes are committed, so a clean clone compiles with no
-// Docker and no database. Regenerate with ./scripts/jooq-generate.sh.
+// src/generated is gitignored: a clean clone must run ./scripts/jooq-generate.sh
+// (needs a migrated database) and ./scripts/api-generate.sh before compiling.
 sourceSets["main"].java.srcDir("src/generated/jooq")
 sourceSets["main"].java.srcDir("src/generated/api")
 

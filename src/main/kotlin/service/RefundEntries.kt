@@ -7,6 +7,7 @@ import org.example.model.enums.PaymentPurpose
 import java.math.BigDecimal
 import java.math.RoundingMode
 import org.example.model.Money
+import org.example.Constants
 
 // TODO release flow must clear hold_reason, or a refund of a released payment credits HELD.
 object RefundEntries {
@@ -78,7 +79,7 @@ object RefundEntries {
         val cappedTotal = if (refundedTotal.compareTo(gross) > 0) gross else refundedTotal
         return Money.calculated(
             cappedTotal.multiply(part)
-                .divide(gross, Money.STORAGE_SCALE + 8, RoundingMode.HALF_EVEN),
+                .divide(gross, Constants.Amounts.DIVISION_SCALE, RoundingMode.HALF_EVEN),
             currency,
         )
     }

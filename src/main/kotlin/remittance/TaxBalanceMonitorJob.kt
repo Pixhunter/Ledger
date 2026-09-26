@@ -6,7 +6,9 @@ import org.example.model.enums.ProcessingErrorCode
 import org.example.repository.ProcessingErrorStore
 import java.math.BigDecimal
 import java.time.LocalDate
-import java.util.UUID
+import java.time.ZoneId
+import org.example.Constants
+import org.example.randomUuid
 
 /**
  * Snapshots every country's tax balance daily.
@@ -14,19 +16,21 @@ import java.util.UUID
  * Negative means we remitted more than we owed - a refund landed after the
  * period was filed. The government does not give it back; it is recovered by
  * offsetting future sales in that country. A country with refunds and no new
- * sales never recovers, so after NEGATIVE_DAYS_LIMIT days it goes to the
+ * sales never recovers, so after TAX_NEGATIVE_DAYS_LIMIT days it goes to the
  * review queue.
  */
 class TaxBalanceMonitorJob(
     private val remittances: TaxRemittanceStore,
     private val errors: ProcessingErrorStore,
-    private val negativeDaysLimit: Int = NEGATIVE_DAYS_LIMIT,
+    private val negativeDaysLimit: Int = Constants.Jobs.TAX_NEGATIVE_DAYS_LIMIT,
+    private val reportingZone: ZoneId = Constants.Jobs.REPORTING_ZONE,
 ) {
     suspend fun run(balanceDate: LocalDate): Int {
         var reported = 0
         val processingErrors = mutableListOf<ProcessingError>()
 
-        val liabilities = remittances.liabilities()
+        val endOfDay = balanceDate.plusDays(1).atStartOfDay(reportingZone).toInstant()
+        val liabilities = remittances.liabilities(endOfDay)
         remittances.recordDailyBalances(liabilities, balanceDate)
 
         liabilities.forEach { liability ->
@@ -45,7 +49,7 @@ class TaxBalanceMonitorJob(
 
     private fun error(country: String, balance: BigDecimal, days: Int, date: LocalDate) =
         ProcessingError(
-            id = UUID.randomUUID(),
+            id = randomUuid(),
             eventType = EventType.TAX_REMITTANCE,
             externalReference = "$country-$date",
             payload = """{"country":"$country","balance":"$balance","negativeDays":$days}""",
@@ -53,7 +57,4 @@ class TaxBalanceMonitorJob(
             detail = "$days consecutive negative days, over-remitted $balance",
         )
 
-    private companion object {
-        const val NEGATIVE_DAYS_LIMIT = 3
-    }
 }

@@ -18,8 +18,8 @@ import org.example.tax.TaxRates
 import org.example.tax.VatIdRules
 import org.slf4j.LoggerFactory
 import java.time.Clock
-import java.time.Duration
-import java.util.UUID
+import org.example.Constants
+import org.example.randomUuid
 
 /**
  * Decides everything WITHOUT touching the database, then writes once.
@@ -92,7 +92,7 @@ class PaymentService(
         val fee = if (taxUnresolved) Money.ZERO else TaxCalculator.fee(gross - tax, feeRate, request.currency)
 
         val payment = PaymentEntity(
-            id = UUID.randomUUID(),
+            id = randomUuid(),
             pspReference = request.pspReference,
             merchantId = request.merchantId,
             gross = gross,
@@ -127,14 +127,14 @@ class PaymentService(
         }
 
         val now = clock.instant()
-        if (request.paymentTime.isBefore(now.minus(MAX_DATE_DRIFT)) ||
-            request.paymentTime.isAfter(now.plus(MAX_DATE_DRIFT))
+        if (request.paymentTime.isBefore(now.minus(Constants.Dates.PAYMENT_MAX_DRIFT)) ||
+            request.paymentTime.isAfter(now.plus(Constants.Dates.PAYMENT_MAX_DRIFT))
         ) {
             log.warn("payment {} has suspicious paymentTime {} (received at {})", request.pspReference, request.paymentTime, now)
             errors += LedgerError(
                 ProcessingErrorCode.INVALID_DATE,
                 request.pspReference,
-                "paymentTime=${request.paymentTime}, receivedAt=$now, allowedDrift=$MAX_DATE_DRIFT",
+                "paymentTime=${request.paymentTime}, receivedAt=$now, allowedDrift=${Constants.Dates.PAYMENT_MAX_DRIFT}",
             )
         }
         if (invalidVatId) {
@@ -174,7 +174,7 @@ class PaymentService(
                 rawPayload,
                 errors.map {
                     ProcessingError(
-                        id = UUID.randomUUID(),
+                        id = randomUuid(),
                         eventType = EventType.CAPTURE,
                         externalReference = it.reference,
                         payload = rawPayload,
@@ -196,7 +196,4 @@ class PaymentService(
             is LedgerWrite.RecordedOverRefund -> error("a capture cannot answer $write")
         }
 
-    private companion object {
-        val MAX_DATE_DRIFT: Duration = Duration.ofDays(7)
-    }
 }

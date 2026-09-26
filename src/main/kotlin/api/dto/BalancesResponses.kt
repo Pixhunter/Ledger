@@ -19,6 +19,9 @@ data class MerchantBalancesDto(
     /** The requested day, or null when the answer is the live balance. */
     val date: String?,
     val asOf: String,
+    val limit: Int,
+    /** Pass back as `after` for the next page. Null on the last page. */
+    val nextCursor: String? = null,
     val merchants: List<MerchantBalanceDto>,
 )
 

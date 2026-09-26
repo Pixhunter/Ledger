@@ -5,6 +5,7 @@ import java.math.BigDecimal
 import java.time.LocalDate
 import java.time.Instant
 import java.util.UUID
+import org.example.Constants
 
 data class MerchantBalance(
     val merchantId: UUID,
@@ -39,7 +40,7 @@ interface PayoutStore {
     ): List<MerchantBalance>
 
     /** Atomically claims at most [limit] rows for one worker. */
-    suspend fun due(status: PayoutStatus, limit: Int = 100): List<DuePayout>
+    suspend fun due(status: PayoutStatus, limit: Int = Constants.Jobs.CLAIM_LIMIT): List<DuePayout>
 
     suspend fun markSent(merchantId: UUID, payoutDate: LocalDate, pspReference: String)
 

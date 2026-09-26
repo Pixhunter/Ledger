@@ -22,6 +22,7 @@ import org.slf4j.LoggerFactory
 import java.time.ZoneOffset
 import java.util.UUID
 import java.math.BigDecimal
+import org.example.randomUuid
 
 class PaymentRepository(private val dsl: DSLContext) : PaymentStore {
 
@@ -100,7 +101,7 @@ class PaymentRepository(private val dsl: DSLContext) : PaymentStore {
                     insertProcessingError(
                         db,
                         ProcessingError(
-                            id = UUID.randomUUID(),
+                            id = randomUuid(),
                             eventType = EventType.CAPTURE,
                             externalReference = payment.pspReference,
                             payload = rawPayload,
@@ -134,7 +135,7 @@ class PaymentRepository(private val dsl: DSLContext) : PaymentStore {
 
             // One money event, then its lines. Type and payment id live on the
             // transaction so they are not repeated on every entry.
-            val transactionId = UUID.randomUUID()
+            val transactionId = randomUuid()
 
             db.insertInto(LEDGER_TRANSACTION)
                 .set(LEDGER_TRANSACTION.ID, transactionId)

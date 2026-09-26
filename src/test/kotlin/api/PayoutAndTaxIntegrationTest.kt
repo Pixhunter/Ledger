@@ -8,11 +8,9 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import org.example.jooq.tables.references.MERCHANT
 import org.example.jooq.tables.references.LEDGER_ENTRY
 import org.example.jooq.tables.references.LEDGER_TRANSACTION
 import org.example.jooq.tables.references.MERCHANT_DAILY_BALANCE
-import org.example.jooq.tables.references.MERCHANT_PAYMENT_DETAILS
 import org.example.jooq.tables.references.PAYOUT
 import org.example.jooq.tables.references.PAYMENT
 import org.example.jooq.tables.references.PAYMENT_HOLD
@@ -24,7 +22,6 @@ import org.example.model.enums.PaymentPurpose
 import org.example.model.enums.LedgerTransactionType
 import org.example.model.enums.PayoutStatus
 import org.example.model.enums.ProcessingErrorCode
-import org.example.model.enums.TaxCategory
 import org.example.payout.PayoutCalculationJob
 import org.example.payout.PayoutDisbursementJob
 import org.example.psp.PayoutRequest
@@ -41,19 +38,20 @@ import org.example.repository.ProcessingErrorRepository
 import org.example.repository.TaxRemittanceRepository
 import org.example.service.InMemoryMerchantRegistry
 import org.example.support.money
-import org.jooq.JSONB
 import java.time.LocalDate
 import java.time.Instant
 import java.time.ZoneId
-import java.util.UUID
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import org.example.randomUuid
 
 class PayoutAndTaxIntegrationTest : LedgerApiIntegrationTestSupport() {
 
     private val payoutDate: LocalDate = LocalDate.now(ZoneId.of("Europe/London"))
-    private val period: LocalDate = LocalDate.of(2026, 8, 1)
+    // Captures are dated now, so the filing period has to be the month they
+    // fall in: the job only files tax points before the period end.
+    private val period: LocalDate = LocalDate.now(ZoneId.of("Europe/London")).withDayOfMonth(1)
 
     private val errors by lazy { ProcessingErrorRepository(dsl) }
     private val payoutStore by lazy { PayoutRepository(dsl) }
@@ -169,6 +167,27 @@ class PayoutAndTaxIntegrationTest : LedgerApiIntegrationTestSupport() {
     }
 
     @Test
+    fun `a sale after the period end is not in that return`() = testApplication {
+        application { ledgerModule(testConfig(), dsl, InMemoryMerchantRegistry(setOf(merchantId))) }
+        seedMerchant()
+
+        assertEquals(HttpStatusCode.OK, send(PAYMENT_CAPTURE_ENDPOINT, paymentBody()).status)
+
+        val owed = entries().balance(PaymentPurpose.TAX)
+        assertTrue(owed.signum() < 0)
+
+        val lastMonth = period.minusMonths(1)
+        assertTrue(runBlocking { TaxRemittanceCalculationJob(remittanceStore).run(lastMonth) }.isEmpty())
+
+        assertEquals(0, dsl.fetchCount(TAX_REMITTANCE))
+        assertEquals(owed, entries().balance(PaymentPurpose.TAX))
+
+        // The same sale is filed by the period it actually belongs to.
+        assertEquals(1, runBlocking { TaxRemittanceCalculationJob(remittanceStore).run(period) }.size)
+        assertEquals(money("0"), entries().balance(PaymentPurpose.TAX))
+    }
+
+    @Test
     fun `a refund after the period is filed leaves the country negative and is reported`() =
         testApplication {
             application { ledgerModule(testConfig(), dsl, InMemoryMerchantRegistry(setOf(merchantId))) }
@@ -207,7 +226,8 @@ class PayoutAndTaxIntegrationTest : LedgerApiIntegrationTestSupport() {
         )
 
         val payment = dsl.selectFrom(PAYMENT).fetchSingle()
-        val releaseId = UUID.randomUUID()
+        val releaseId = randomUuid()
+        val releasedAt = java.time.OffsetDateTime.now(java.time.ZoneOffset.UTC)
         dsl.transaction { cfg ->
             val db = org.jooq.impl.DSL.using(cfg)
             db.update(PAYMENT_HOLD)
@@ -226,9 +246,10 @@ class PayoutAndTaxIntegrationTest : LedgerApiIntegrationTestSupport() {
                 LEDGER_ENTRY.PURPOSE_KEY,
                 LEDGER_ENTRY.AMOUNT,
                 LEDGER_ENTRY.CURRENCY,
+                LEDGER_ENTRY.OCCURRED_AT,
             )
-                .values(releaseId, PaymentPurpose.HELD.id, merchantId.toString(), money("95.00"), "EUR")
-                .values(releaseId, PaymentPurpose.MERCHANT.id, merchantId.toString(), money("-95.00"), "EUR")
+                .values(releaseId, PaymentPurpose.HELD.id, merchantId.toString(), money("95.00"), "EUR", releasedAt)
+                .values(releaseId, PaymentPurpose.MERCHANT.id, merchantId.toString(), money("-95.00"), "EUR", releasedAt)
                 .execute()
         }
 
@@ -281,34 +302,6 @@ class PayoutAndTaxIntegrationTest : LedgerApiIntegrationTestSupport() {
                 ),
             ),
         )
-    }
-
-    private fun seedMerchant() {
-        dsl.transaction { cfg ->
-            val db = org.jooq.impl.DSL.using(cfg)
-
-            db.insertInto(MERCHANT)
-                .set(MERCHANT.ID, merchantId)
-                .set(MERCHANT.NAME, "Test merchant")
-                .set(MERCHANT.CURRENCY, "EUR")
-                .set(MERCHANT.FEE_RATE_BPS, 500)
-                .set(MERCHANT.TAX_CATEGORY, TaxCategory.STANDARD.id)
-                .set(MERCHANT.STATUS, 1.toShort())
-                .onConflict(MERCHANT.ID)
-                .doNothing()
-                .execute()
-
-            db.insertInto(MERCHANT_PAYMENT_DETAILS)
-                .set(MERCHANT_PAYMENT_DETAILS.MERCHANT_ID, merchantId)
-                .set(MERCHANT_PAYMENT_DETAILS.PSP_ACCOUNT_ID, "acct-merchant-1")
-                .set(MERCHANT_PAYMENT_DETAILS.ACCOUNT_HOLDER, "Test merchant")
-                .set(MERCHANT_PAYMENT_DETAILS.IBAN, "DE89370400440532013000")
-                .set(MERCHANT_PAYMENT_DETAILS.BANK_COUNTRY, "DE")
-                .set(MERCHANT_PAYMENT_DETAILS.ADDRESS, JSONB.valueOf("""{"country":"DE"}"""))
-                .onConflict(MERCHANT_PAYMENT_DETAILS.MERCHANT_ID)
-                .doNothing()
-                .execute()
-        }
     }
 
     private class RecordingPsp : PspPayoutClient {

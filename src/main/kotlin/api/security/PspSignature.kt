@@ -2,6 +2,7 @@ package org.example.api.security
 
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
+import org.example.Constants
 
 /**
  * HMAC over the raw body, as every PSP webhook does.
@@ -48,7 +49,7 @@ class PspSignature(
     }
 
     companion object {
-        private const val ALGORITHM = "HmacSHA256"
-        const val HEADER = "X-Psp-Signature"
+        val HEADER = Constants.Api.PSP_SIGNATURE_HEADER
+        private val ALGORITHM = Constants.Api.PSP_SIGNATURE_ALGORITHM
     }
 }
