@@ -3,6 +3,7 @@ package org.example.payout
 import org.example.model.enums.PayoutStatus
 import java.math.BigDecimal
 import java.time.LocalDate
+import java.time.Instant
 import java.util.UUID
 
 data class MerchantBalance(
@@ -21,23 +22,21 @@ data class DuePayout(
 
 interface PayoutStore {
 
-    /** Every merchant's MERCHANT balance, any sign. HELD and SUSPENSE are separate accounts. */
-    suspend fun balances(): List<MerchantBalance>
+    /** One database-clock boundary shared by every page in this run. */
+    suspend fun processingCutoff(endOfDay: Instant): Instant = endOfDay
 
-    suspend fun recordDailyBalance(balance: MerchantBalance, balanceDate: LocalDate)
+    suspend fun balancePage(afterMerchantId: UUID?, limit: Int, cutoff: Instant): List<MerchantBalance>
 
-    suspend fun recordDailyBalances(balances: List<MerchantBalance>, balanceDate: LocalDate) {
-        balances.forEach { recordDailyBalance(it, balanceDate) }
-    }
+    suspend fun recordDailyBalances(balances: List<MerchantBalance>, balanceDate: LocalDate)
 
     /** How many business days up to and including balanceDate this merchant has been negative. */
     suspend fun consecutiveNegativeDays(merchantId: UUID, balanceDate: LocalDate): Int
 
-    /**
-     * Payout row plus its PAYOUT ledger transaction, in one transaction.
-     * Returns false when (merchant, date) is already there - a rerun pays nobody twice.
-     */
-    suspend fun computePayout(balance: MerchantBalance, payoutDate: LocalDate): Boolean
+    suspend fun computePayouts(
+        balances: List<MerchantBalance>,
+        payoutDate: LocalDate,
+        cutoff: Instant,
+    ): List<MerchantBalance>
 
     /** Atomically claims at most [limit] rows for one worker. */
     suspend fun due(status: PayoutStatus, limit: Int = 100): List<DuePayout>

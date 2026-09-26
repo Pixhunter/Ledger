@@ -130,9 +130,11 @@ class TaxJobsTest {
         val sent = mutableListOf<Pair<String, LocalDate>>()
 
         override suspend fun liabilities() = liabilities
-
-        override suspend fun recordDailyBalance(liability: TaxLiability, balanceDate: LocalDate) {
-            snapshots += liability.country to liability.amount
+        override suspend fun recordDailyBalances(
+            liabilities: List<TaxLiability>,
+            balanceDate: LocalDate,
+        ) {
+            snapshots += liabilities.map { it.country to it.amount }
         }
 
         override suspend fun consecutiveNegativeDays(country: String, balanceDate: LocalDate) = negativeDays

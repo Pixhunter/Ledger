@@ -35,6 +35,8 @@ object TaxCountryVote {
             return Result.Decided(best.key, best.value)
         }
 
+        // TODO Replace this permissive fallback with stronger evidence validation when
+        // tax-jurisdiction verification enters scope.
         billingCountry?.let {
             log.warn("no majority, falling back to billing country {}: {}", it, evidence)
             return Result.Decided(it, 1)

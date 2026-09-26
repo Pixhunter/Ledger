@@ -72,10 +72,10 @@ row. Not implemented: the operator action that clears them.
 
 | Process                   | Rule                                                 | Status      |
 |---------------------------|------------------------------------------------------|-------------|
-| Merchant payout           | Daily positive balance; exclude `HELD`               | Schema only |
+| Merchant payout           | Daily positive balance; exclude `HELD`; fixed cutoff | Implemented |
 | Negative merchant balance | Carry forward; alert after 14 days                   | Planned     |
 | Tax settlement            | Pay per country and filing calendar, usually monthly | Planned     |
-| Tax rates                 | Version with `valid_from`; cache; freeze on capture  | Table only  |
+| Tax rates                 | Version with `valid_from`; cache; freeze on capture  | Implemented |
 | PSP reconciliation        | Compare PSP and ledger totals daily                  | Planned     |
 
 Hourly payout is a later option. It changes scheduling, not accounting.
@@ -84,8 +84,26 @@ Hourly payout is a later option. It changes scheduling, not accounting.
 
 - At the end of each London business day, calculate each merchant's positive
   `MERCHANT` balance. Exclude `HELD` funds.
+- Every day, process all unsettled entries received before one fixed cutoff.
+- A late PSP payment, even from an older day, enters the next batch. Future-dated
+  payments wait until eligible.
+- A `payment_time` over seven days from receipt is recorded as an operational
+  warning; the payment is still stored and processed.
 - A non-positive balance is carried forward and future sales offset it.
 - If a merchant remains negative for 14 days, alert operations.
+
+## Tax category
+
+Only the standard tax category is supported for this task. Reduced and special
+categories require merchant-specific configuration in a future version.
+
+VAT ID formats are versioned by country and `valid_from`. A valid format permits
+reverse charge. An invalid format creates `INVALID_VAT_ID`; the payment still
+uses normal consumer tax. Live VIES registration checks are future work.
+
+Two matching location signals are preferred for the tax country. For this task,
+billing country remains the fallback; weak evidence creates
+`WEAK_TAX_COUNTRY_EVIDENCE`. Stronger verification is future work.
 
 ## Architecture status
 

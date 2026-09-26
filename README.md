@@ -793,11 +793,11 @@ tax_rate
   rate_bps     int         1900 = 19%
 ```
 
-**Implemented as a constant.** The task allows the rate to come on the capture
-webhook; we derive it from the customer's country instead, from a map of EU
-standard rates. `mor.tax_rate` is created but not read: it is the shape the
-lookup needs in production - versioned by `valid_from`, keyed by category - and
-wiring it is a repository swap, not a redesign.
+**Implemented as versioned in-memory reference data.** Each record contains the
+country, currency, `valid_from`, rate and legal reference. The newest record
+effective at `payment_time` is frozen on the payment. History starts on
+2021-01-01; an older payment is recorded as `TAX_UNRESOLVED` and held for manual
+processing instead of receiving an invented rate.
 
 Lookup for a payment:
 
@@ -808,6 +808,14 @@ rate     = row with latest valid_from <= payment.payment_time
 ```
 
 Rules:
+
+- A `payment_time` more than seven days before or after receipt creates an
+  `INVALID_DATE` processing error, but the successful PSP event is still recorded.
+- A payout run uses one immutable end-of-London-day cutoff. Entries received
+  after it and payments whose `payment_time` is after it are excluded.
+- Each source merchant entry is linked to the payout transaction that settled
+  it. Late old payments therefore enter the next batch; processing does not
+  depend on their age. The seven-day date anomaly remains an operational warning.
 
 - **Append-only.** A rate change is a new row with a future `valid_from`;
   old rows stay for audits.

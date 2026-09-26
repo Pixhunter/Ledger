@@ -15,7 +15,10 @@ import org.example.tax.BasisPoints
 import org.example.tax.TaxCalculator
 import org.example.tax.TaxCountryVote
 import org.example.tax.TaxRates
+import org.example.tax.VatIdRules
 import org.slf4j.LoggerFactory
+import java.time.Clock
+import java.time.Duration
 import java.util.UUID
 
 /**
@@ -32,15 +35,16 @@ import java.util.UUID
  *   4. merchant     -> HELD (UNKNOWN_MERCHANT)
  *   5. one write
  */
-// TODO tax category from merchant.tax_category, and the rate whose valid_from <= paymentTime
-//      (README, "Tax rate"). Both are fixed here today.
 class PaymentService(
     private val payments: PaymentStore,
     private val rates: TaxRates,
     private val merchants: MerchantRegistry,
     private val feeRate: BasisPoints,
     private val morCountry: String,
+    // TODO Load the merchant's category when reduced/special VAT rates enter scope.
     private val taxCategory: TaxCategory = TaxCategory.STANDARD,
+    private val vatIdRules: VatIdRules = VatIdRules(),
+    private val clock: Clock = Clock.systemUTC(),
 ) {
     private val log = LoggerFactory.getLogger(PaymentService::class.java)
 
@@ -69,13 +73,13 @@ class PaymentService(
 
         val taxCountry = (vote as? TaxCountryVote.Result.Decided)?.country
 
-        val reverseCharge = taxCountry != null && request.isBusiness && taxCountry != morCountry
+        val suppliedVatId = request.customerVatId?.takeIf { it.isNotBlank() }
+        val validVatId = suppliedVatId?.let { vatIdRules.isValid(taxCountry, it, request.paymentTime) } == true
+        val invalidVatId = suppliedVatId != null && !validVatId
+        val reverseCharge = taxCountry != null && validVatId && taxCountry != morCountry
 
-        val rate = when {
-            taxCountry == null -> null
-            reverseCharge -> BasisPoints.ZERO
-            else -> rates.lookup(taxCountry)
-        }
+        val historicalRate = taxCountry?.let { rates.lookup(it, request.currency, request.paymentTime) }
+        val rate = historicalRate?.let { if (reverseCharge) BasisPoints.ZERO else it.rate }
 
         val taxUnresolved = taxCountry == null || rate == null
         val known = merchants.exists(request.merchantId)
@@ -111,6 +115,34 @@ class PaymentService(
                 request,
                 reason,
                 if (reason == HoldReason.UNKNOWN_MERCHANT) "merchant ${request.merchantId}" else "evidence=$evidence",
+            )
+        }.toMutableList()
+
+        if ((vote as? TaxCountryVote.Result.Decided)?.agreeing == 1) {
+            errors += LedgerError(
+                ProcessingErrorCode.WEAK_TAX_COUNTRY_EVIDENCE,
+                request.pspReference,
+                "tax country selected from billing address only; evidence=$evidence",
+            )
+        }
+
+        val now = clock.instant()
+        if (request.paymentTime.isBefore(now.minus(MAX_DATE_DRIFT)) ||
+            request.paymentTime.isAfter(now.plus(MAX_DATE_DRIFT))
+        ) {
+            log.warn("payment {} has suspicious paymentTime {} (received at {})", request.pspReference, request.paymentTime, now)
+            errors += LedgerError(
+                ProcessingErrorCode.INVALID_DATE,
+                request.pspReference,
+                "paymentTime=${request.paymentTime}, receivedAt=$now, allowedDrift=$MAX_DATE_DRIFT",
+            )
+        }
+        if (invalidVatId) {
+            log.warn("payment {} contains an invalid VAT ID for {}", request.pspReference, taxCountry)
+            errors += LedgerError(
+                ProcessingErrorCode.INVALID_VAT_ID,
+                request.pspReference,
+                "VAT ID format is not valid for country=$taxCountry at paymentTime=${request.paymentTime}",
             )
         }
 
@@ -163,4 +195,8 @@ class PaymentService(
             is LedgerWrite.Inserted -> LedgerResult.Recorded(write.paymentStatus, errors.firstOrNull())
             is LedgerWrite.RecordedOverRefund -> error("a capture cannot answer $write")
         }
+
+    private companion object {
+        val MAX_DATE_DRIFT: Duration = Duration.ofDays(7)
+    }
 }

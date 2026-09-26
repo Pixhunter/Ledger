@@ -165,6 +165,7 @@ CREATE TABLE mor.ledger_entry
     purpose_key    text   NULL,                      -- TAX: country, MERCHANT/HELD/SUSPENSE: merchant id
     amount         numeric(19,4) NOT NULL,           -- major units, signed: + debit, - credit
     currency       text   NOT NULL,
+    settled_by_transaction_id uuid NULL REFERENCES mor.ledger_transaction (id),
 
     CONSTRAINT ledger_entry_amount_ck   CHECK (amount <> 0),
     CONSTRAINT ledger_entry_purpose_ck  CHECK (purpose IN (1, 2, 3, 4, 5, 6)),
@@ -173,6 +174,9 @@ CREATE TABLE mor.ledger_entry
 
 CREATE INDEX ledger_entry_purpose_idx ON mor.ledger_entry (purpose, purpose_key, currency);
 CREATE INDEX ledger_entry_transaction_idx ON mor.ledger_entry (transaction_id);
+CREATE INDEX ledger_entry_unsettled_merchant_idx
+    ON mor.ledger_entry (purpose, purpose_key, currency, id)
+    WHERE settled_by_transaction_id IS NULL;
 
 -- ---------------------------------------------------------------------------
 -- payout: one per merchant per business day.

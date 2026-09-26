@@ -17,6 +17,8 @@ import org.example.tax.TaxRates
 import org.example.support.money
 import java.math.BigDecimal
 import java.time.Instant
+import java.time.Clock
+import java.time.ZoneOffset
 import java.util.UUID
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -105,6 +107,53 @@ class PaymentServiceTest {
     }
 
     @Test
+    fun `an invalid VAT ID records an error and uses consumer tax`() {
+        val store = RecordingStore()
+
+        run(store, request(vatId = "ES-NOT-A-VAT-ID"))
+
+        val payment = store.single()
+        assertTrue(!payment.reverseCharge)
+        assertEquals(money("21.00"), payment.tax)
+        assertEquals(ProcessingErrorCode.INVALID_VAT_ID, store.errors.single().code)
+    }
+
+    @Test
+    fun `billing fallback records weak tax-country evidence`() {
+        val store = RecordingStore()
+
+        run(store, request().copy(cardIssuingCountry = "DE", ipCountry = "FR"))
+
+        assertEquals("ES", store.single().taxCountry)
+        assertEquals(ProcessingErrorCode.WEAK_TAX_COUNTRY_EVIDENCE, store.errors.single().code)
+    }
+
+    @Test
+    fun `a suspicious date is recorded as an error without holding the payment`() {
+        val store = RecordingStore()
+
+        val result = run(store, request(paymentTime = Instant.parse("2026-10-05T10:15:30Z")))
+
+        assertIs<LedgerResult.Recorded>(result)
+        assertTrue(store.single().holdReasons.isEmpty())
+        assertEquals(ProcessingErrorCode.INVALID_DATE, store.errors.single().code)
+    }
+
+    @Test
+    fun `a payment older than tax history is held for manual processing`() {
+        val store = RecordingStore()
+
+        val result = run(store, request(paymentTime = Instant.parse("2020-12-31T23:59:59Z")))
+
+        assertIs<LedgerResult.Recorded>(result)
+        assertEquals(setOf(HoldReason.TAX_UNRESOLVED), store.single().holdReasons)
+        assertEquals(
+            setOf(ProcessingErrorCode.TAX_UNRESOLVED, ProcessingErrorCode.INVALID_DATE),
+            store.errors.map { it.code }.toSet(),
+        )
+    }
+
+    @Test
     fun `a replay is reported as a duplicate and decided only once`() {
         val store = RecordingStore(LedgerWrite.Duplicate(PaymentStatus.POSTED))
 
@@ -124,6 +173,7 @@ class PaymentServiceTest {
             merchants = InMemoryMerchantRegistry(known),
             feeRate = BasisPoints(300),
             morCountry = "NL",
+            clock = Clock.fixed(Instant.parse("2026-09-26T10:00:00Z"), ZoneOffset.UTC),
         ).createPayment(request)
     }
 
@@ -131,6 +181,7 @@ class PaymentServiceTest {
         amount: BigDecimal = money("121.00"),
         country: String = "ES",
         vatId: String? = null,
+        paymentTime: Instant = Instant.parse("2026-09-22T10:15:30Z"),
     ) = PaymentModel(
         pspReference = "psp-${UUID.randomUUID()}",
         merchantId = merchantId,
@@ -142,7 +193,7 @@ class PaymentServiceTest {
         cardIssuingCountry = country,
         ipCountry = country,
         customerVatId = vatId,
-        paymentTime = Instant.parse("2026-09-22T10:15:30Z"),
+        paymentTime = paymentTime,
     )
 
     private class RecordingStore(
@@ -150,6 +201,7 @@ class PaymentServiceTest {
     ) : PaymentStore {
 
         val writes = mutableListOf<Pair<PaymentEntity, List<LedgerEntry>>>()
+        val errors = mutableListOf<ProcessingError>()
 
         val entries: List<LedgerEntry> get() = writes.single().second
 
@@ -165,6 +217,7 @@ class PaymentServiceTest {
             errors: List<ProcessingError>,
         ): LedgerWrite {
             writes += payment to entries
+            this.errors += errors
             return outcome ?: LedgerWrite.Inserted(payment.status)
         }
     }

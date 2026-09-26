@@ -12,4 +12,6 @@ enum class ProcessingErrorCode(override val id: Short) : EnumId {
     TAX_UNRESOLVED(8),
     NEGATIVE_BALANCE(9),
     NEGATIVE_TAX_BALANCE(10),
+    INVALID_VAT_ID(11),
+    WEAK_TAX_COUNTRY_EVIDENCE(12),
 }

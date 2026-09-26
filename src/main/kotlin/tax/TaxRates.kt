@@ -1,44 +1,52 @@
 package org.example.tax
 
-// Stub by choice: the task allows the rate on the capture webhook. Production reads
-// mor.tax_rate - keyed by (country, category, valid_from), so a rate change never
-// reprices past payments - which is a repository swap, not a redesign.
-class TaxRates(
-    private val rates: Map<String, BasisPoints> = EU_STANDARD,
-) {
-    fun lookup(country: String): BasisPoints? = rates[country.uppercase()]
+import org.example.model.enums.Currency
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneOffset
 
-    fun supported(): Set<String> = rates.keys
+data class TaxRate(
+    val country: String,
+    val currency: Currency,
+    val validFrom: LocalDate,
+    val rate: BasisPoints,
+    val legalReference: String,
+)
+
+/** Selects the rate using the PSP payment time, so law changes never reprice old payments. */
+class TaxRates(private val rates: List<TaxRate> = EU_STANDARD_HISTORY) {
+    fun lookup(country: String, currency: Currency, at: Instant): TaxRate? {
+        val paymentDate = at.atZone(ZoneOffset.UTC).toLocalDate()
+        return rates.asSequence()
+            .filter { it.country.equals(country, true) && it.currency == currency && it.validFrom <= paymentDate }
+            .maxByOrNull { it.validFrom }
+    }
+
+    fun supported(): Set<String> = rates.mapTo(mutableSetOf()) { it.country }
 
     companion object {
-        val EU_STANDARD: Map<String, BasisPoints> = mapOf(
-            "AT" to BasisPoints(2000),
-            "BE" to BasisPoints(2100),
-            "BG" to BasisPoints(2000),
-            "CY" to BasisPoints(1900),
-            "CZ" to BasisPoints(2100),
-            "DE" to BasisPoints(1900),
-            "DK" to BasisPoints(2500),
-            "EE" to BasisPoints(2400),
-            "ES" to BasisPoints(2100),
-            "FI" to BasisPoints(2550),
-            "FR" to BasisPoints(2000),
-            "GR" to BasisPoints(2400),
-            "HR" to BasisPoints(2500),
-            "HU" to BasisPoints(2700),
-            "IE" to BasisPoints(2300),
-            "IT" to BasisPoints(2200),
-            "LT" to BasisPoints(2100),
-            "LU" to BasisPoints(1700),
-            "LV" to BasisPoints(2100),
-            "MT" to BasisPoints(1800),
-            "NL" to BasisPoints(2100),
-            "PL" to BasisPoints(2300),
-            "PT" to BasisPoints(2300),
-            "RO" to BasisPoints(2100),
-            "SE" to BasisPoints(2500),
-            "SI" to BasisPoints(2200),
-            "SK" to BasisPoints(2300),
+        private val HISTORY_START = LocalDate.of(2021, 1, 1)
+        private const val EC_2021 = "European Commission VAT rates, 1 January 2021"
+
+        private fun rate(country: String, bps: Int, from: LocalDate = HISTORY_START, law: String = EC_2021) =
+            TaxRate(country, Currency.EUR, from, BasisPoints(bps), law)
+
+        val EU_STANDARD_HISTORY: List<TaxRate> = listOf(
+            rate("AT", 2000), rate("BE", 2100), rate("BG", 2000), rate("CY", 1900),
+            rate("CZ", 2100), rate("DE", 1900), rate("DK", 2500), rate("EE", 2000),
+            rate("EE", 2200, LocalDate.of(2024, 1, 1), "Estonian VAT Act amendment RT I, 01.07.2023, 2"),
+            rate("EE", 2400, LocalDate.of(2025, 7, 1), "Estonian VAT Act amendment RT I, 02.01.2025, 2"),
+            rate("ES", 2100), rate("FI", 2400),
+            rate("FI", 2550, LocalDate.of(2024, 9, 1), "Finnish Act 706/2024"),
+            rate("FR", 2000), rate("GR", 2400), rate("HR", 2500), rate("HU", 2700),
+            rate("IE", 2300), rate("IT", 2200), rate("LT", 2100), rate("LU", 1700),
+            rate("LU", 1600, LocalDate.of(2023, 1, 1), "Luxembourg law of 26 October 2022"),
+            rate("LU", 1700, LocalDate.of(2024, 1, 1), "Luxembourg law of 26 October 2022 (temporary rate ended)"),
+            rate("LV", 2100), rate("MT", 1800), rate("NL", 2100), rate("PL", 2300),
+            rate("PT", 2300), rate("RO", 1900),
+            rate("RO", 2100, LocalDate.of(2025, 8, 1), "Romanian Law 141/2025"),
+            rate("SE", 2500), rate("SI", 2200), rate("SK", 2000),
+            rate("SK", 2300, LocalDate.of(2025, 1, 1), "Slovak Act 278/2024"),
         )
     }
 }

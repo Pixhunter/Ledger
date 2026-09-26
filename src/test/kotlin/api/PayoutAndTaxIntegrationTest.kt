@@ -9,14 +9,19 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.example.jooq.tables.references.MERCHANT
+import org.example.jooq.tables.references.LEDGER_ENTRY
+import org.example.jooq.tables.references.LEDGER_TRANSACTION
 import org.example.jooq.tables.references.MERCHANT_DAILY_BALANCE
 import org.example.jooq.tables.references.MERCHANT_PAYMENT_DETAILS
 import org.example.jooq.tables.references.PAYOUT
+import org.example.jooq.tables.references.PAYMENT
+import org.example.jooq.tables.references.PAYMENT_HOLD
 import org.example.jooq.tables.references.PROCESSING_ERROR
 import org.example.jooq.tables.references.TAX_REMITTANCE
 import org.example.ledgerModule
 import org.example.model.enumById
 import org.example.model.enums.PaymentPurpose
+import org.example.model.enums.LedgerTransactionType
 import org.example.model.enums.PayoutStatus
 import org.example.model.enums.ProcessingErrorCode
 import org.example.model.enums.TaxCategory
@@ -37,8 +42,9 @@ import org.example.repository.TaxRemittanceRepository
 import org.example.service.InMemoryMerchantRegistry
 import org.example.support.money
 import org.jooq.JSONB
-import java.math.BigDecimal
 import java.time.LocalDate
+import java.time.Instant
+import java.time.ZoneId
 import java.util.UUID
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -46,7 +52,7 @@ import kotlin.test.assertTrue
 
 class PayoutAndTaxIntegrationTest : LedgerApiIntegrationTestSupport() {
 
-    private val payoutDate: LocalDate = LocalDate.of(2026, 9, 25)
+    private val payoutDate: LocalDate = LocalDate.now(ZoneId.of("Europe/London"))
     private val period: LocalDate = LocalDate.of(2026, 8, 1)
 
     private val errors by lazy { ProcessingErrorRepository(dsl) }
@@ -187,6 +193,95 @@ class PayoutAndTaxIntegrationTest : LedgerApiIntegrationTestSupport() {
             )
             assertTrue(error.externalReference.startsWith("ES-"))
         }
+
+    @Test
+    fun `payment released today is included in payout regardless of capture date`() = testApplication {
+        application { ledgerModule(testConfig(), dsl, InMemoryMerchantRegistry()) }
+        seedMerchant()
+        assertEquals(
+            HttpStatusCode.OK,
+            send(
+                PAYMENT_CAPTURE_ENDPOINT,
+                paymentBody(paymentTime = Instant.parse("2026-09-23T10:00:00Z")),
+            ).status,
+        )
+
+        val payment = dsl.selectFrom(PAYMENT).fetchSingle()
+        val releaseId = UUID.randomUUID()
+        dsl.transaction { cfg ->
+            val db = org.jooq.impl.DSL.using(cfg)
+            db.update(PAYMENT_HOLD)
+                .set(PAYMENT_HOLD.RESOLVED_AT, org.jooq.impl.DSL.currentOffsetDateTime())
+                .where(PAYMENT_HOLD.PAYMENT_ID.eq(payment.id))
+                .execute()
+            db.insertInto(LEDGER_TRANSACTION)
+                .set(LEDGER_TRANSACTION.ID, releaseId)
+                .set(LEDGER_TRANSACTION.TYPE, LedgerTransactionType.RELEASE.id)
+                .set(LEDGER_TRANSACTION.PAYMENT_ID, payment.id)
+                .execute()
+            db.insertInto(
+                LEDGER_ENTRY,
+                LEDGER_ENTRY.TRANSACTION_ID,
+                LEDGER_ENTRY.PURPOSE,
+                LEDGER_ENTRY.PURPOSE_KEY,
+                LEDGER_ENTRY.AMOUNT,
+                LEDGER_ENTRY.CURRENCY,
+            )
+                .values(releaseId, PaymentPurpose.HELD.id, merchantId.toString(), money("95.00"), "EUR")
+                .values(releaseId, PaymentPurpose.MERCHANT.id, merchantId.toString(), money("-95.00"), "EUR")
+                .execute()
+        }
+
+        val computed = runBlocking { PayoutCalculationJob(payoutStore, errors).run(payoutDate) }
+        assertEquals(1, computed.size)
+        assertEquals(0, computed.single().amount.compareTo(money("95.00")))
+        assertEquals(0, dsl.selectFrom(PAYOUT).fetchSingle().amount.compareTo(money("95.00")))
+    }
+
+    @Test
+    fun `future-dated payment is not included in the current payout period`() = testApplication {
+        application { ledgerModule(testConfig(), dsl, InMemoryMerchantRegistry(setOf(merchantId))) }
+        seedMerchant()
+
+        assertEquals(
+            HttpStatusCode.OK,
+            send(
+                PAYMENT_CAPTURE_ENDPOINT,
+                paymentBody(paymentTime = payoutDate.plusDays(3).atStartOfDay(ZoneId.of("Europe/London")).toInstant()),
+            ).status,
+        )
+
+        assertTrue(runBlocking { PayoutCalculationJob(payoutStore, errors).run(payoutDate) }.isEmpty())
+        assertEquals(0, dsl.fetchCount(PAYOUT))
+    }
+
+    @Test
+    fun `a late old payment is settled by the next eligible batch`() = testApplication {
+        application { ledgerModule(testConfig(), dsl, InMemoryMerchantRegistry(setOf(merchantId))) }
+        seedMerchant()
+        assertEquals(
+            HttpStatusCode.OK,
+            send(
+                PAYMENT_CAPTURE_ENDPOINT,
+                paymentBody(paymentTime = Instant.now().minusSeconds(10 * 24 * 60 * 60L)),
+            ).status,
+        )
+
+        assertTrue(runBlocking { PayoutCalculationJob(payoutStore, errors).run(payoutDate.minusDays(1)) }.isEmpty())
+        assertEquals(1, runBlocking { PayoutCalculationJob(payoutStore, errors).run(payoutDate) }.size)
+        assertEquals(
+            0,
+            dsl.fetchCount(
+                org.jooq.impl.DSL.table("mor.ledger_entry"),
+                org.jooq.impl.DSL.condition(
+                    "purpose = ? AND settled_by_transaction_id IS NULL AND transaction_id IN " +
+                        "(SELECT id FROM mor.ledger_transaction WHERE type <> ?)",
+                    PaymentPurpose.MERCHANT.id,
+                    LedgerTransactionType.PAYOUT.id,
+                ),
+            ),
+        )
+    }
 
     private fun seedMerchant() {
         dsl.transaction { cfg ->

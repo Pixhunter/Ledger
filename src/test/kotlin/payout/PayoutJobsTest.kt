@@ -11,6 +11,7 @@ import org.example.psp.PspPayoutClient
 import org.example.repository.ProcessingErrorStore
 import java.math.BigDecimal
 import java.time.LocalDate
+import java.time.Instant
 import java.util.UUID
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -41,6 +42,36 @@ class PayoutJobsTest {
         )
 
         assertTrue(PayoutCalculationJob(store, RecordingErrors()).run(date).isEmpty())
+    }
+
+    @Test
+    fun `a transient merchant failure is retried without duplicating the payout`() = runBlocking {
+        val store = FakePayoutStore(
+            balances = listOf(MerchantBalance(merchant, "Test merchant", BigDecimal("97.00"), 3)),
+            computeFailures = 1,
+        )
+
+        assertEquals(
+            1,
+            PayoutCalculationJob(store, RecordingErrors(), retryDelayMs = 0).run(date).size,
+        )
+        assertEquals(2, store.computeCalls)
+        assertEquals(1, store.computed.size)
+    }
+
+    @Test
+    fun `merchant balances are processed in bounded pages`() = runBlocking {
+        val balances = List(5) {
+            MerchantBalance(UUID.randomUUID(), "Merchant $it", BigDecimal("10.00"), 1)
+        }
+        val store = FakePayoutStore(balances = balances)
+
+        assertEquals(
+            5,
+            PayoutCalculationJob(store, RecordingErrors(), batchSize = 2).run(date).size,
+        )
+        assertEquals(4, store.balancePageCalls)
+        assertEquals(5, store.computed.size)
     }
 
     @Test
@@ -113,25 +144,45 @@ class PayoutJobsTest {
         private val due: List<DuePayout> = emptyList(),
         private val alreadyComputed: Boolean = false,
         private val negativeDays: Int = 0,
+        private var computeFailures: Int = 0,
     ) : PayoutStore {
 
         val snapshots = mutableListOf<Pair<UUID, BigDecimal>>()
         val computed = mutableListOf<Pair<UUID, BigDecimal>>()
         val sent = mutableListOf<Pair<UUID, LocalDate>>()
+        var computeCalls = 0
+        var balancePageCalls = 0
 
-        override suspend fun balances() = balances
+        override suspend fun balancePage(afterMerchantId: UUID?, limit: Int, cutoff: Instant): List<MerchantBalance> {
+            balancePageCalls++
+            return balances.sortedBy { it.merchantId.toString() }
+                .filter { afterMerchantId == null || it.merchantId.toString() > afterMerchantId.toString() }
+                .take(limit)
+        }
 
-        override suspend fun recordDailyBalance(balance: MerchantBalance, balanceDate: LocalDate) {
-            snapshots += balance.merchantId to balance.amount
+        override suspend fun recordDailyBalances(
+            balances: List<MerchantBalance>,
+            balanceDate: LocalDate,
+        ) {
+            snapshots += balances.map { it.merchantId to it.amount }
+        }
+
+        override suspend fun computePayouts(
+            balances: List<MerchantBalance>,
+            payoutDate: LocalDate,
+            cutoff: Instant,
+        ): List<MerchantBalance> {
+            computeCalls++
+            if (computeFailures > 0) {
+                computeFailures--
+                error("temporary database error")
+            }
+            if (alreadyComputed) return emptyList()
+            computed += balances.map { it.merchantId to it.amount }
+            return balances
         }
 
         override suspend fun consecutiveNegativeDays(merchantId: UUID, balanceDate: LocalDate) = negativeDays
-
-        override suspend fun computePayout(balance: MerchantBalance, payoutDate: LocalDate): Boolean {
-            if (alreadyComputed) return false
-            computed += balance.merchantId to balance.amount
-            return true
-        }
 
         override suspend fun due(status: PayoutStatus, limit: Int) = due.take(limit)
 
