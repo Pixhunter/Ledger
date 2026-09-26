@@ -8,6 +8,7 @@ import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.plugins.statuspages.StatusPages
 import io.ktor.server.response.respond
 import org.example.api.controller.LedgerController
+import org.example.api.controller.BalancesController
 import org.example.api.controller.apiRoutes
 import org.example.api.controller.devRoutes
 import org.example.api.apiJson
@@ -24,6 +25,7 @@ import org.example.remittance.TaxBalanceMonitorJob
 import org.example.remittance.TaxRemittanceCalculationJob
 import org.example.remittance.TaxRemittanceDisbursementJob
 import org.example.repository.TaxRemittanceRepository
+import org.example.repository.BalancesRepository
 import org.example.repository.MerchantRepository
 import org.example.repository.PaymentRepository
 import org.example.repository.PayoutRepository
@@ -89,6 +91,9 @@ fun Application.ledgerModule(
         taxCalculation, taxDisbursement, taxMonitor,
     ).start(this)
 
-    apiRoutes(LedgerController(payments, refunds, processingErrors, signature))
+    apiRoutes(
+        LedgerController(payments, refunds, processingErrors, signature),
+        BalancesController(BalancesRepository(dsl)),
+    )
     devRoutes(config.server, payoutCalculation, payoutDisbursement, taxCalculation, taxDisbursement)
 }

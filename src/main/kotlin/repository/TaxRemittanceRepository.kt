@@ -17,6 +17,8 @@ import org.jooq.DSLContext
 import org.jooq.impl.DSL
 import java.math.BigDecimal
 import java.time.LocalDate
+import java.time.OffsetDateTime
+import java.time.ZoneOffset
 import java.util.UUID
 
 class TaxRemittanceRepository(private val dsl: DSLContext) : TaxRemittanceStore {
@@ -94,6 +96,7 @@ class TaxRemittanceRepository(private val dsl: DSLContext) : TaxRemittanceStore 
             dsl.transactionResult { cfg ->
                 val db = DSL.using(cfg)
                 val transactionId = UUID.randomUUID()
+                val now = OffsetDateTime.now(ZoneOffset.UTC)
                 val amount = liability.amount.takeIf { it.signum() > 0 }
                     ?: return@transactionResult false
 
@@ -122,14 +125,15 @@ class TaxRemittanceRepository(private val dsl: DSLContext) : TaxRemittanceStore 
                     LEDGER_ENTRY.PURPOSE_KEY,
                     LEDGER_ENTRY.AMOUNT,
                     LEDGER_ENTRY.CURRENCY,
+                    LEDGER_ENTRY.OCCURRED_AT,
                 )
                     .values(
                         transactionId, PaymentPurpose.TAX.id,
-                        liability.country, amount, Currency.EUR.name,
+                        liability.country, amount, Currency.EUR.name, now,
                     )
                     .values(
                         transactionId, PaymentPurpose.PSP.id,
-                        null, amount.negate(), Currency.EUR.name,
+                        null, amount.negate(), Currency.EUR.name, now,
                     )
                     .execute()
 

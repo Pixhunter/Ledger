@@ -15,8 +15,9 @@ import org.example.payout.PayoutStore
 import org.jooq.DSLContext
 import org.jooq.impl.DSL
 import java.time.LocalDate
-import java.time.Instant
+import java.time.OffsetDateTime
 import java.time.ZoneOffset
+import java.time.Instant
 import java.util.UUID
 
 class PayoutRepository(private val dsl: DSLContext) : PayoutStore {
@@ -167,6 +168,8 @@ class PayoutRepository(private val dsl: DSLContext) : PayoutStore {
                     .execute()
             }
 
+            val now = OffsetDateTime.now(ZoneOffset.UTC)
+
             if (insertedIds.isNotEmpty()) {
                 val lines = db.insertInto(
                     LEDGER_ENTRY,
@@ -175,16 +178,17 @@ class PayoutRepository(private val dsl: DSLContext) : PayoutStore {
                     LEDGER_ENTRY.PURPOSE_KEY,
                     LEDGER_ENTRY.AMOUNT,
                     LEDGER_ENTRY.CURRENCY,
+                    LEDGER_ENTRY.OCCURRED_AT,
                 )
                 candidates.filter { it.merchantId in insertedIds }.forEach { balance ->
                     val transactionId = transactionByMerchant.getValue(balance.merchantId)
                     lines.values(
                         transactionId, PaymentPurpose.MERCHANT.id,
-                        balance.merchantId.toString(), balance.amount, Currency.EUR.name,
+                        balance.merchantId.toString(), balance.amount, Currency.EUR.name, now,
                     )
                     lines.values(
                         transactionId, PaymentPurpose.PSP.id,
-                        null, balance.amount.negate(), Currency.EUR.name,
+                        null, balance.amount.negate(), Currency.EUR.name, now,
                     )
                 }
                 lines.execute()

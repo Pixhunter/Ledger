@@ -111,6 +111,69 @@ components:
         - OTHER
       examples: [ CUSTOMER_REQUEST ]
 
+    TaxBalance:
+      description: |
+        What one country's tax authority is owed. Amounts are decimal strings
+        in the ledger currency, never floats.
+      type: object
+      required: [ country, currency, to, owedAtStart, movement, owedAtEnd ]
+      properties:
+        country:
+          $ref: '#/components/schemas/Country'
+        currency:
+          $ref: '#/components/schemas/Currency'
+        from:
+          description: Absent when the answer is the balance now.
+          type: string
+          format: date-time
+        to:
+          type: string
+          format: date-time
+        owedAtStart:
+          description: Owed immediately before the window. Zero when there is no window.
+          type: string
+        movement:
+          description: Change inside the window - sales add, refunds and remittances subtract.
+          type: string
+        owedAtEnd:
+          description: Owed at the end of the window. This is the number a return is filed for.
+          type: string
+
+    MerchantBalances:
+      type: object
+      required: [ currency, asOf, merchants ]
+      properties:
+        currency:
+          $ref: '#/components/schemas/Currency'
+        date:
+          description: The day read from the snapshot, or null for the live balance.
+          type: string
+          format: date
+        asOf:
+          type: string
+          format: date-time
+        merchants:
+          type: array
+          items:
+            $ref: '#/components/schemas/MerchantBalance'
+
+    MerchantBalance:
+      type: object
+      required: [ merchantId, merchantName, available, held ]
+      properties:
+        merchantId:
+          $ref: '#/components/schemas/Id'
+        merchantName:
+          type: string
+        available:
+          description: Payable on the next payout run.
+          type: string
+        held:
+          description: |
+            Recorded but frozen, never paid out until released. Absent for a
+            past date: the nightly snapshot records the merchant balance only.
+          type: string
+
     Currency:
       description: ISO 4217. EUR only for now; more once the MoR settles in them.
       type: string

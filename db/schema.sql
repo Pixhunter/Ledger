@@ -5,7 +5,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict rFM01gRLZegoctY6weKE7DMuEwpO46xkVyAkWc0QZq3SyQQovz8tSagegaEDRgO
+\restrict oCo4wjd0tFLltQiayQxKpi7ogWlHiFnPV4WUt2NUc5vINxBq87GTcIqh3tRoc1N
 
 -- Dumped from database version 17.11
 -- Dumped by pg_dump version 17.11
@@ -44,6 +44,8 @@ CREATE TABLE mor.ledger_entry (
     purpose_key text,
     amount numeric(19,4) NOT NULL,
     currency text NOT NULL,
+    occurred_at timestamp with time zone NOT NULL,
+    settled_by_transaction_id uuid,
     CONSTRAINT ledger_entry_amount_ck CHECK ((amount <> (0)::numeric)),
     CONSTRAINT ledger_entry_currency_ck CHECK ((currency ~ '^[A-Z]{3}$'::text)),
     CONSTRAINT ledger_entry_purpose_ck CHECK ((purpose = ANY (ARRAY[1, 2, 3, 4, 5, 6])))
@@ -149,15 +151,26 @@ CREATE TABLE mor.payment (
     reverse_charge boolean DEFAULT false NOT NULL,
     evidence jsonb NOT NULL,
     status smallint NOT NULL,
-    hold_reason smallint,
     payment_time timestamp with time zone NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT payment_amounts_ck CHECK (((gross > (0)::numeric) AND (tax >= (0)::numeric) AND (fee >= (0)::numeric) AND (merchant_net >= (0)::numeric))),
     CONSTRAINT payment_country_ck CHECK (((tax_country IS NULL) OR (tax_country ~ '^[A-Z]{2}$'::text))),
     CONSTRAINT payment_currency_ck CHECK ((currency ~ '^[A-Z]{3}$'::text)),
-    CONSTRAINT payment_hold_ck CHECK (((status <> 2) OR (hold_reason IS NOT NULL))),
     CONSTRAINT payment_split_ck CHECK ((gross = ((tax + fee) + merchant_net))),
-    CONSTRAINT payment_status_ck CHECK ((status = ANY (ARRAY[1, 2, 4, 5])))
+    CONSTRAINT payment_status_ck CHECK ((status = ANY (ARRAY[1, 4, 5])))
+);
+
+
+--
+-- Name: payment_hold; Type: TABLE; Schema: mor; Owner: -
+--
+
+CREATE TABLE mor.payment_hold (
+    payment_id uuid NOT NULL,
+    reason smallint NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    resolved_at timestamp with time zone,
+    CONSTRAINT payment_hold_reason_ck CHECK ((reason = ANY (ARRAY[1, 2])))
 );
 
 
@@ -173,10 +186,11 @@ CREATE TABLE mor.payout (
     ledger_transaction_id uuid NOT NULL,
     status smallint NOT NULL,
     psp_reference text,
+    claimed_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT payout_amount_ck CHECK ((amount > (0)::numeric)),
     CONSTRAINT payout_currency_ck CHECK ((currency ~ '^[A-Z]{3}$'::text)),
-    CONSTRAINT payout_status_ck CHECK ((status = ANY (ARRAY[1, 2, 3])))
+    CONSTRAINT payout_status_ck CHECK ((status = ANY (ARRAY[1, 2, 3, 4])))
 );
 
 
@@ -192,7 +206,7 @@ CREATE TABLE mor.processing_error (
     error_code smallint NOT NULL,
     error_detail text NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT processing_error_code_ck CHECK ((error_code = ANY (ARRAY[1, 2, 3, 5, 6, 7, 8, 9, 10]))),
+    CONSTRAINT processing_error_code_ck CHECK ((error_code = ANY (ARRAY[1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12]))),
     CONSTRAINT processing_error_event_ck CHECK ((event_type = ANY (ARRAY[1, 2, 3, 4])))
 );
 
@@ -205,6 +219,7 @@ CREATE TABLE mor.refund (
     id uuid NOT NULL,
     refund_reference text NOT NULL,
     payment_id uuid NOT NULL,
+    ledger_transaction_id uuid NOT NULL,
     amount numeric(19,4) NOT NULL,
     currency text NOT NULL,
     reason smallint NOT NULL,
@@ -259,11 +274,12 @@ CREATE TABLE mor.tax_remittance (
     ledger_transaction_id uuid NOT NULL,
     status smallint NOT NULL,
     reference text,
+    claimed_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT tax_remittance_amount_ck CHECK ((amount > (0)::numeric)),
     CONSTRAINT tax_remittance_country_ck CHECK ((country ~ '^[A-Z]{2}$'::text)),
     CONSTRAINT tax_remittance_currency_ck CHECK ((currency ~ '^[A-Z]{3}$'::text)),
-    CONSTRAINT tax_remittance_status_ck CHECK ((status = ANY (ARRAY[1, 2, 3])))
+    CONSTRAINT tax_remittance_status_ck CHECK ((status = ANY (ARRAY[1, 2, 3, 4])))
 );
 
 
@@ -305,6 +321,14 @@ ALTER TABLE ONLY mor.merchant_payment_details
 
 ALTER TABLE ONLY mor.merchant
     ADD CONSTRAINT merchant_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: payment_hold payment_hold_pkey; Type: CONSTRAINT; Schema: mor; Owner: -
+--
+
+ALTER TABLE ONLY mor.payment_hold
+    ADD CONSTRAINT payment_hold_pkey PRIMARY KEY (payment_id, reason);
 
 
 --
@@ -364,10 +388,10 @@ ALTER TABLE ONLY mor.tax_remittance
 
 
 --
--- Name: ledger_entry_purpose_idx; Type: INDEX; Schema: mor; Owner: -
+-- Name: ledger_entry_balance_idx; Type: INDEX; Schema: mor; Owner: -
 --
 
-CREATE INDEX ledger_entry_purpose_idx ON mor.ledger_entry USING btree (purpose, purpose_key, currency);
+CREATE INDEX ledger_entry_balance_idx ON mor.ledger_entry USING btree (purpose, purpose_key, currency, occurred_at);
 
 
 --
@@ -375,6 +399,13 @@ CREATE INDEX ledger_entry_purpose_idx ON mor.ledger_entry USING btree (purpose, 
 --
 
 CREATE INDEX ledger_entry_transaction_idx ON mor.ledger_entry USING btree (transaction_id);
+
+
+--
+-- Name: ledger_entry_unsettled_merchant_idx; Type: INDEX; Schema: mor; Owner: -
+--
+
+CREATE INDEX ledger_entry_unsettled_merchant_idx ON mor.ledger_entry USING btree (purpose, purpose_key, currency, id) WHERE (settled_by_transaction_id IS NULL);
 
 
 --
@@ -392,10 +423,10 @@ CREATE INDEX merchant_daily_balance_idx ON mor.merchant_daily_balance USING btre
 
 
 --
--- Name: payment_held_idx; Type: INDEX; Schema: mor; Owner: -
+-- Name: payment_hold_active_idx; Type: INDEX; Schema: mor; Owner: -
 --
 
-CREATE INDEX payment_held_idx ON mor.payment USING btree (status) WHERE (status = 2);
+CREATE INDEX payment_hold_active_idx ON mor.payment_hold USING btree (payment_id) WHERE (resolved_at IS NULL);
 
 
 --
@@ -420,6 +451,13 @@ CREATE INDEX payout_date_idx ON mor.payout USING btree (payout_date);
 
 
 --
+-- Name: payout_due_idx; Type: INDEX; Schema: mor; Owner: -
+--
+
+CREATE INDEX payout_due_idx ON mor.payout USING btree (status, payout_date);
+
+
+--
 -- Name: processing_error_created_idx; Type: INDEX; Schema: mor; Owner: -
 --
 
@@ -431,6 +469,13 @@ CREATE INDEX processing_error_created_idx ON mor.processing_error USING btree (c
 --
 
 CREATE UNIQUE INDEX processing_error_uk ON mor.processing_error USING btree (event_type, external_reference, error_code);
+
+
+--
+-- Name: refund_ledger_transaction_uk; Type: INDEX; Schema: mor; Owner: -
+--
+
+CREATE UNIQUE INDEX refund_ledger_transaction_uk ON mor.refund USING btree (ledger_transaction_id);
 
 
 --
@@ -452,6 +497,21 @@ CREATE UNIQUE INDEX refund_reference_uk ON mor.refund USING btree (refund_refere
 --
 
 CREATE INDEX tax_daily_balance_idx ON mor.tax_daily_balance USING btree (country, balance_date DESC);
+
+
+--
+-- Name: tax_remittance_due_idx; Type: INDEX; Schema: mor; Owner: -
+--
+
+CREATE INDEX tax_remittance_due_idx ON mor.tax_remittance USING btree (status, period_start);
+
+
+--
+-- Name: ledger_entry ledger_entry_settled_by_transaction_id_fkey; Type: FK CONSTRAINT; Schema: mor; Owner: -
+--
+
+ALTER TABLE ONLY mor.ledger_entry
+    ADD CONSTRAINT ledger_entry_settled_by_transaction_id_fkey FOREIGN KEY (settled_by_transaction_id) REFERENCES mor.ledger_transaction(id);
 
 
 --
@@ -487,6 +547,14 @@ ALTER TABLE ONLY mor.merchant_payment_details
 
 
 --
+-- Name: payment_hold payment_hold_payment_id_fkey; Type: FK CONSTRAINT; Schema: mor; Owner: -
+--
+
+ALTER TABLE ONLY mor.payment_hold
+    ADD CONSTRAINT payment_hold_payment_id_fkey FOREIGN KEY (payment_id) REFERENCES mor.payment(id);
+
+
+--
 -- Name: payout payout_ledger_transaction_id_fkey; Type: FK CONSTRAINT; Schema: mor; Owner: -
 --
 
@@ -500,6 +568,14 @@ ALTER TABLE ONLY mor.payout
 
 ALTER TABLE ONLY mor.payout
     ADD CONSTRAINT payout_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES mor.merchant(id);
+
+
+--
+-- Name: refund refund_ledger_transaction_id_fkey; Type: FK CONSTRAINT; Schema: mor; Owner: -
+--
+
+ALTER TABLE ONLY mor.refund
+    ADD CONSTRAINT refund_ledger_transaction_id_fkey FOREIGN KEY (ledger_transaction_id) REFERENCES mor.ledger_transaction(id) DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -522,5 +598,5 @@ ALTER TABLE ONLY mor.tax_remittance
 -- PostgreSQL database dump complete
 --
 
-\unrestrict rFM01gRLZegoctY6weKE7DMuEwpO46xkVyAkWc0QZq3SyQQovz8tSagegaEDRgO
+\unrestrict oCo4wjd0tFLltQiayQxKpi7ogWlHiFnPV4WUt2NUc5vINxBq87GTcIqh3tRoc1N
 

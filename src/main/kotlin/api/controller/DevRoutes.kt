@@ -4,13 +4,14 @@ import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationCall
-import io.ktor.server.request.receiveText
 import io.ktor.server.response.respond
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 import io.ktor.server.routing.routing
 import kotlinx.serialization.Serializable
+import org.example.api.dto.HealthDto
+import org.example.api.dto.SentDto
 import org.example.config.ServerConfig
 import org.example.payout.PayoutCalculationJob
 import org.example.payout.PayoutDisbursementJob
@@ -54,7 +55,7 @@ fun Application.devRoutes(
         }
 
         post("/v1/payouts/send") {
-            call.respond(HttpStatusCode.OK, mapOf("sent" to payoutDisbursement.run()))
+            call.respond(HttpStatusCode.OK, SentDto(payoutDisbursement.run()))
         }
 
         post("/v1/tax-remittances/compute") {
@@ -80,11 +81,11 @@ fun Application.devRoutes(
         }
 
         post("/v1/tax-remittances/send") {
-            call.respond(HttpStatusCode.OK, mapOf("sent" to taxDisbursement.run()))
+            call.respond(HttpStatusCode.OK, SentDto(taxDisbursement.run()))
         }
 
         get("/health") {
-            call.respond(HttpStatusCode.OK, mapOf("status" to "UP"))
+            call.respond(HttpStatusCode.OK, HealthDto("UP"))
         }
 
         get("/swagger") {

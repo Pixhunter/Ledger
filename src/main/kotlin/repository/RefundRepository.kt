@@ -26,6 +26,7 @@ import org.jooq.impl.DSL
 import org.slf4j.LoggerFactory
 import java.util.UUID
 import java.math.BigDecimal
+import java.time.ZoneOffset
 
 class RefundRepository(private val dsl: DSLContext) : RefundStore {
 
@@ -149,10 +150,14 @@ class RefundRepository(private val dsl: DSLContext) : RefundStore {
                 LEDGER_ENTRY.PURPOSE_KEY,
                 LEDGER_ENTRY.AMOUNT,
                 LEDGER_ENTRY.CURRENCY,
+                LEDGER_ENTRY.OCCURRED_AT,
             )
 
             ledgerEntries.forEach { e ->
-                lines.values(transactionId, e.purpose.id, e.purposeKey, e.amount, e.currency.name)
+                lines.values(
+                    transactionId, e.purpose.id, e.purposeKey,
+                    e.amount, e.currency.name, refund.refundedAt.atOffset(ZoneOffset.UTC),
+                )
             }
 
             lines.execute()

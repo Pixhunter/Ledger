@@ -113,6 +113,13 @@ merchantNet = 97.00  -> owed to merchant
 
 Two independent flows plus one read endpoint.
 
+![Ledger services and daily balance processing](docs/images/service-architecture.svg)
+
+The customer PSP reports money events. Merchant and tax reference data are
+separate integrations, and merchant payouts may use a different PSP. The daily
+balance stage processes every eligible unsettled entry before one fixed cutoff,
+including late historical payments.
+
 ### 1. Capture (API, synchronous)
 
 The PSP already took the money. The webhook is a **notification, not a

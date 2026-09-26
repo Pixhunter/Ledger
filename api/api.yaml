@@ -98,6 +98,140 @@ paths:
                 status: FAILED
                 reason: INVALID_REQUEST
 
+  /v1/balances/tax:
+    get:
+      tags: [ balances ]
+      summary: What one country's tax authority is owed
+      description: |
+        Sums the country's TAX account in the ledger.
+
+        Without `from` and `to` it answers "what do we owe right now". With
+        them it answers a filing period: the balance at the start, the movement
+        inside the window, and the balance at the end. Movement is what a VAT
+        return is built from - sales add to it, refunds take away, a remittance
+        clears it.
+
+        The window is on the tax point (`paymentTime`, `refundedAt`), not on
+        when the row was written, so a sale on 31 August belongs to August even
+        if the webhook arrived in September.
+
+        One country per call. Several would be a list parameter, and the query
+        is already keyed that way - left out until there are enough countries
+        for it to matter.
+      operationId: taxBalance
+      security: []
+      parameters:
+        - name: country
+          in: query
+          required: true
+          schema:
+            $ref: './definitions.yaml#/components/schemas/Country'
+          example: ES
+        - name: from
+          in: query
+          required: false
+          description: Start of the window, inclusive. Omit for the balance now.
+          schema:
+            type: string
+            format: date-time
+          example: '2026-09-01T00:00:00Z'
+        - name: to
+          in: query
+          required: false
+          description: End of the window, exclusive. Defaults to now.
+          schema:
+            type: string
+            format: date-time
+          example: '2026-10-01T00:00:00Z'
+      responses:
+        '200':
+          description: Balance
+          content:
+            application/json:
+              schema:
+                $ref: './definitions.yaml#/components/schemas/TaxBalance'
+              example:
+                country: ES
+                currency: EUR
+                from: '2026-09-01T00:00:00Z'
+                to: '2026-10-01T00:00:00Z'
+                owedAtStart: '0.00'
+                movement: '21.00'
+                owedAtEnd: '21.00'
+        '400':
+          description: Missing or malformed country or dates
+          content:
+            application/json:
+              schema:
+                $ref: './definitions.yaml#/components/schemas/LedgerResponse'
+              example:
+                status: FAILED
+                reason: INVALID_REQUEST
+
+  /v1/balances/merchants:
+    get:
+      tags: [ balances ]
+      summary: What merchants are owed
+      description: |
+        Current balance per merchant: `available` is payable on the next payout
+        run, `held` is recorded but frozen and never paid out.
+
+        Repeat `merchantId` to ask for several. Omitting it returns every
+        merchant with a balance, which is fine at this size and would need
+        paging at scale.
+
+        Without `date` the answer is the live balance summed from the ledger.
+        With `date` it is that day's close, read from the nightly snapshot -
+        one indexed row, and the number the payout job actually acted on. The
+        snapshot has no row for a day the close job did not run, and it records
+        the merchant balance only, so `held` is absent for a past date.
+      operationId: merchantBalances
+      security: []
+      parameters:
+        - name: merchantId
+          in: query
+          required: false
+          description: Repeat for several merchants. Omit for all.
+          schema:
+            type: array
+            items:
+              $ref: './definitions.yaml#/components/schemas/Id'
+          style: form
+          explode: true
+        - name: date
+          in: query
+          required: false
+          description: Business day to read from the nightly snapshot. Omit for the live balance.
+          schema:
+            type: string
+            format: date
+          example: '2026-09-25'
+      responses:
+        '200':
+          description: Balances
+          content:
+            application/json:
+              schema:
+                $ref: './definitions.yaml#/components/schemas/MerchantBalances'
+              example:
+                currency: EUR
+                date: null
+                asOf: '2026-09-26T18:12:00Z'
+                merchants:
+                  - merchantId: 1a1e7d6c-0000-4000-8000-000000000001
+                    merchantName: Aurora SaaS
+                    available: '95.00'
+                    held: '0.00'
+        '400':
+          description: Malformed merchant id
+          content:
+            application/json:
+              schema:
+                $ref: './definitions.yaml#/components/schemas/LedgerResponse'
+              example:
+                status: FAILED
+                reason: INVALID_REQUEST
+
 components:
   securitySchemes:
     PspSignature:

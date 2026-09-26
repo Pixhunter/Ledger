@@ -165,6 +165,11 @@ CREATE TABLE mor.ledger_entry
     purpose_key    text   NULL,                      -- TAX: country, MERCHANT/HELD/SUSPENSE: merchant id
     amount         numeric(19,4) NOT NULL,           -- major units, signed: + debit, - credit
     currency       text   NOT NULL,
+    -- When the money moved, not when we wrote the row: the tax point for a
+    -- capture, refundedAt for a refund. Copied onto the entry so a balance is
+    -- one index scan with no join to ledger_transaction. Safe to denormalise:
+    -- entries are append-only and never updated.
+    occurred_at    timestamptz NOT NULL,
     settled_by_transaction_id uuid NULL REFERENCES mor.ledger_transaction (id),
 
     CONSTRAINT ledger_entry_amount_ck   CHECK (amount <> 0),
@@ -172,7 +177,9 @@ CREATE TABLE mor.ledger_entry
     CONSTRAINT ledger_entry_currency_ck CHECK (currency ~ '^[A-Z]{3}$')
 );
 
-CREATE INDEX ledger_entry_purpose_idx ON mor.ledger_entry (purpose, purpose_key, currency);
+-- Balances: sum one account, optionally up to a point in time.
+CREATE INDEX ledger_entry_balance_idx
+    ON mor.ledger_entry (purpose, purpose_key, currency, occurred_at);
 CREATE INDEX ledger_entry_transaction_idx ON mor.ledger_entry (transaction_id);
 CREATE INDEX ledger_entry_unsettled_merchant_idx
     ON mor.ledger_entry (purpose, purpose_key, currency, id)

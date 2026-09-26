@@ -153,6 +153,7 @@ class PaymentRepository(private val dsl: DSLContext) : PaymentStore {
                 LEDGER_ENTRY.PURPOSE_KEY,
                 LEDGER_ENTRY.AMOUNT,
                 LEDGER_ENTRY.CURRENCY,
+                LEDGER_ENTRY.OCCURRED_AT,
             )
 
             entries.forEach { e ->
@@ -162,6 +163,7 @@ class PaymentRepository(private val dsl: DSLContext) : PaymentStore {
                     e.purposeKey,
                     e.amount,
                     e.currency.name,
+                    payment.paymentTime.atOffset(ZoneOffset.UTC),
                 )
             }
 

@@ -66,6 +66,59 @@ merchant receivable or MoR loss with a new ledger transaction, then deletes the
 exception row. Implemented: the refund, the `SUSPENSE` entries and the exception
 row. Not implemented: the operator action that clears them.
 
+## Balances
+
+Two read-only reports over the ledger. Neither writes anything, and both are a
+`SUM` over `ledger_entry`, which carries its own `occurred_at` so no join is
+needed.
+
+`occurred_at` is the **tax point** - `paymentTime` for a capture, `refundedAt`
+for a refund - not when the row was written. A sale on 31 August belongs to
+August even if the webhook arrived in September.
+
+| Report | Question | Caller |
+|--------|----------|--------|
+| `GET /v1/balances/tax` | What does one country's tax authority get, over a filing period? | Accounting, filing the return |
+| `GET /v1/balances/merchants` | What is owed to merchants right now? | MoR operations |
+
+### Tax, per country, per period
+
+`country` is required; `from` and `to` are optional. Without them the answer is
+the balance now. With them it is a filing period:
+
+| Field | Meaning |
+|-------|---------|
+| `owedAtStart` | Owed immediately before the window |
+| `movement` | Change inside it: sales add, refunds and remittances subtract |
+| `owedAtEnd` | Owed at the end - the number the return is filed for |
+
+One country per call. A tax return is filed per country, so a caller preparing
+a return asks for one; batching is a list parameter on the same query and is
+left until there are enough countries to justify it.
+
+### Merchant balances
+
+`available` is payable on the next payout run. `held` is recorded but frozen
+and never paid out. Repeating `merchantId` asks for several; omitting it
+returns everyone with a balance, which needs paging at scale.
+
+Without `date` the answer is the live ledger balance. With `date` it is that
+day's close, read from `merchant_daily_balance` - one indexed row instead of a
+sum, and the number the payout job acted on, which is what a dispute is about.
+
+Two limits of the snapshot: there is no row for a day the close job did not
+run, and it records the merchant balance only, so `held` is absent for a past
+date.
+
+### Not implemented
+
+- **Merchant activity statement**: captures, refunds and payouts between two
+  dates. Same data, grouped by `ledger_transaction.type`.
+- **Auth.** These are not PSP endpoints, so the webhook signature does not
+  apply. They are open today; production needs its own scheme for the finance
+  client and, if merchants ever call directly, a rule that a merchant can only
+  read its own balance.
+
 ## Settlement and controls
 
 ![Settlement cycle](docs/images/settlement-cycle.svg)
