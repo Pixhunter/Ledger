@@ -9,6 +9,7 @@ import org.example.model.enums.Currency
 import org.example.model.enums.HoldReason
 import org.example.model.enums.PaymentPurpose
 import org.example.model.enums.PaymentStatus
+import org.example.model.enums.ProcessingErrorCode
 import org.example.repository.PaymentStore
 import org.example.tax.BasisPoints
 import org.example.tax.TaxRates
@@ -19,6 +20,7 @@ import java.util.UUID
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
+import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 class PaymentServiceTest {
@@ -61,7 +63,9 @@ class PaymentServiceTest {
 
         val result = run(store, request(country = "JP"))
 
-        assertEquals(LedgerResult.Recorded(PaymentStatus.HELD), result)
+        val recorded = assertIs<LedgerResult.Recorded>(result)
+        assertEquals(PaymentStatus.HELD, recorded.paymentStatus)
+        assertEquals(ProcessingErrorCode.TAX_UNRESOLVED, recorded.error?.code)
         val payment = store.single()
         assertEquals(PaymentStatus.HELD, payment.status)
         assertEquals(HoldReason.TAX_UNRESOLVED, payment.holdReason)
@@ -76,7 +80,9 @@ class PaymentServiceTest {
 
         val result = run(store, request(), known = setOf(UUID.randomUUID()))
 
-        assertEquals(LedgerResult.Recorded(PaymentStatus.HELD), result)
+        val recorded = assertIs<LedgerResult.Recorded>(result)
+        assertEquals(PaymentStatus.HELD, recorded.paymentStatus)
+        assertEquals(ProcessingErrorCode.UNKNOWN_MERCHANT, recorded.error?.code)
         val payment = store.single()
         assertEquals(PaymentStatus.HELD, payment.status)
         assertEquals(HoldReason.UNKNOWN_MERCHANT, payment.holdReason)
@@ -109,7 +115,7 @@ class PaymentServiceTest {
     private fun run(
         store: PaymentStore,
         request: PaymentModel,
-        known: Set<UUID> = emptySet(),
+        known: Set<UUID> = setOf(merchantId),
     ): LedgerResult = runBlocking {
         PaymentService(
             payments = store,

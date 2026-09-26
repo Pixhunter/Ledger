@@ -1,4 +1,5 @@
 import java.io.File
+import org.gradle.api.tasks.testing.logging.TestExceptionFormat
 
 plugins {
     kotlin("jvm") version "2.3.21"
@@ -195,6 +196,10 @@ tasks.test {
     // BUILD SUCCESSFUL whether Postgres was exercised or quietly bypassed.
     testLogging {
         events("skipped", "failed")
+        exceptionFormat = TestExceptionFormat.FULL
+        showExceptions = true
+        showCauses = true
+        showStackTraces = true
     }
 
     // One JVM, one container. A second fork would start a second Postgres,

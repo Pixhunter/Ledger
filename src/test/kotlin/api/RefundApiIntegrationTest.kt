@@ -189,7 +189,7 @@ class RefundApiIntegrationTest : LedgerApiIntegrationTestSupport() {
     }
 
     @Test
-    fun `partial fraud refund returns revenue proportionally`() = testApplication {
+    fun `partial fraud refund keeps the MoR fee`() = testApplication {
         application { ledgerModule(testConfig(), dsl, InMemoryMerchantRegistry(setOf(merchantId))) }
 
         assertEquals(HttpStatusCode.OK, send(PAYMENT_CAPTURE_ENDPOINT, paymentBody()).status)
@@ -202,14 +202,14 @@ class RefundApiIntegrationTest : LedgerApiIntegrationTestSupport() {
         )
 
         val refund = dsl.selectFrom(REFUND).fetchSingle()
-        assertEquals(true, refund.feeReturned)
+        assertEquals(false, refund.feeReturned)
         assertEquals(PaymentStatus.PARTIALLY_REFUNDED, enumById(dsl.selectFrom(PAYMENT).fetchSingle().status))
 
         val ledgerEntries = entries()
         assertEquals(money("60.50"), ledgerEntries.balance(PaymentPurpose.PSP))
         assertEquals(money("-10.50"), ledgerEntries.balance(PaymentPurpose.TAX))
-        assertEquals(money("-2.50"), ledgerEntries.balance(PaymentPurpose.REVENUE))
-        assertEquals(money("-47.50"), ledgerEntries.balance(PaymentPurpose.MERCHANT))
+        assertEquals(money("-5.00"), ledgerEntries.balance(PaymentPurpose.REVENUE))
+        assertEquals(money("-45.00"), ledgerEntries.balance(PaymentPurpose.MERCHANT))
         assertEquals(money("0.00"), ledgerEntries.sumOf { it.second })
     }
 
@@ -258,14 +258,14 @@ class RefundApiIntegrationTest : LedgerApiIntegrationTestSupport() {
         assertEquals(PaymentStatus.REFUNDED, enumById(dsl.selectFrom(PAYMENT).fetchSingle().status))
         assertEquals(3, dsl.fetchCount(REFUND))
         assertEquals(4, dsl.fetchCount(LEDGER_TRANSACTION))
-        assertEquals(16, dsl.fetchCount(LEDGER_ENTRY))
-        assertEquals(true, dsl.selectFrom(REFUND).fetch().all { it.feeReturned })
+        assertEquals(13, dsl.fetchCount(LEDGER_ENTRY))
+        assertEquals(false, dsl.selectFrom(REFUND).fetch().any { it.feeReturned })
 
         val ledgerEntries = entries()
         assertEquals(money("0.00"), ledgerEntries.balance(PaymentPurpose.PSP))
         assertEquals(money("0.00"), ledgerEntries.balance(PaymentPurpose.TAX))
-        assertEquals(money("0.00"), ledgerEntries.balance(PaymentPurpose.REVENUE))
-        assertEquals(money("0.00"), ledgerEntries.balance(PaymentPurpose.MERCHANT))
+        assertEquals(money("-5.00"), ledgerEntries.balance(PaymentPurpose.REVENUE))
+        assertEquals(money("5.00"), ledgerEntries.balance(PaymentPurpose.MERCHANT))
         assertEquals(money("0.00"), ledgerEntries.sumOf { it.second })
     }
 
@@ -335,7 +335,7 @@ class RefundApiIntegrationTest : LedgerApiIntegrationTestSupport() {
     }
 
     @Test
-    fun `fraud refund returns the MoR fee`() = testApplication {
+    fun `fraud refund keeps the MoR fee`() = testApplication {
         application { ledgerModule(testConfig(), dsl, InMemoryMerchantRegistry(setOf(merchantId))) }
 
         assertEquals(HttpStatusCode.OK, send(PAYMENT_CAPTURE_ENDPOINT, paymentBody()).status)
@@ -346,13 +346,13 @@ class RefundApiIntegrationTest : LedgerApiIntegrationTestSupport() {
 
         val refund = dsl.selectFrom(REFUND).fetchSingle()
         assertEquals(RefundReason.FRAUD, enumById<RefundReason>(refund.reason))
-        assertEquals(true, refund.feeReturned)
+        assertEquals(false, refund.feeReturned)
 
         val ledgerEntries = entries()
         assertEquals(money("0.00"), ledgerEntries.balance(PaymentPurpose.PSP))
         assertEquals(money("0.00"), ledgerEntries.balance(PaymentPurpose.TAX))
-        assertEquals(money("0.00"), ledgerEntries.balance(PaymentPurpose.REVENUE))
-        assertEquals(money("0.00"), ledgerEntries.balance(PaymentPurpose.MERCHANT))
+        assertEquals(money("-5.00"), ledgerEntries.balance(PaymentPurpose.REVENUE))
+        assertEquals(money("5.00"), ledgerEntries.balance(PaymentPurpose.MERCHANT))
     }
 
     @Test

@@ -185,7 +185,7 @@ class PayoutAndTaxIntegrationTest : LedgerApiIntegrationTestSupport() {
                 ProcessingErrorCode.NEGATIVE_TAX_BALANCE,
                 enumById<ProcessingErrorCode>(error.errorCode),
             )
-            assertTrue(error.errorDetail.contains("ES"))
+            assertTrue(error.externalReference.startsWith("ES-"))
         }
 
     private fun seedMerchant() {

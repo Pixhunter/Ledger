@@ -124,3 +124,17 @@ and pins the Docker API version - see `tasks.test` in `build.gradle.kts`.
 | database tests SKIPPED | same, or the socket path is not in `tasks.test` |
 | `server: IntelliJ IDEA` in a response | IntelliJ's built-in server answered, not this app |
 | `Address already in use` on 8081 | `lsof -i:8081` |
+
+## Continuous integration
+
+GitHub Actions runs `.github/workflows/ci.yml` for every push and pull
+request. It uses JDK 21, regenerates the API and jOOQ sources from a clean
+checkout, and runs the complete Gradle test suite. No repository secrets are
+needed.
+
+To prevent a pull request from being merged while tests are failing, open the
+repository on GitHub and go to **Settings -> Rules -> Rulesets -> New branch
+ruleset**. Target the default branch, enable **Require status checks to pass**,
+and select **CI / test**. Enable **Require a pull request before merging** too
+if changes should always go through review rather than being pushed directly
+to the default branch.
