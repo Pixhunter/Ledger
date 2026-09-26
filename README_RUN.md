@@ -61,6 +61,16 @@ from config, so "Try it out" posts to the running app instead of the IDE's own
 web server on :63342.
 
 ```bash
+SECRET=dev-psp-secret-change-me
+BODY='{"pspReference":"psp-1","merchantId":"5f1d9e02-3ab7-4c88-b0e5-6d427fa1c93b","amount":12100,"currency":"EUR","success":true,"billingAddress":{"country":"ES"},"cardIssuingCountry":"ES","paymentTime":"2026-09-22T10:15:30Z"}'
+SIG=$(printf %s "$BODY" | openssl dgst -sha256 -hmac "$SECRET" -hex | awk '{print $2}')
+
+curl -X POST localhost:8081/v1/payments \
+  -H 'Content-Type: application/json' \
+  -H "X-Psp-Signature: $SIG" \
+  -d "$BODY"
+
+# the request below is the same body, unsigned - it returns 401
 curl -X POST localhost:8081/v1/payments \
   -H 'Content-Type: application/json' \
   -d '{

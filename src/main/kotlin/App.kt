@@ -15,11 +15,16 @@ import org.example.api.generated.model.ErrorReasonDto
 import org.example.api.rejected
 import org.example.api.security.PspSignature
 import org.example.config.AppConfig
+import org.example.payout.PayoutCalculationJob
+import org.example.payout.PayoutDisbursementJob
+import org.example.payout.PayoutScheduler
+import org.example.psp.AcceptingPspPayoutClient
 import org.example.repository.PaymentRepository
+import org.example.repository.PayoutRepository
+import org.example.repository.ProcessingErrorRepository
 import org.example.repository.RefundRepository
 import org.example.service.MerchantRegistry
 import org.example.service.PaymentService
-import org.example.service.RefundFeePolicy
 import org.example.service.RefundService
 import org.example.tax.BasisPoints
 import org.example.tax.TaxRates
@@ -35,7 +40,7 @@ fun Application.ledgerModule(
 ) {
     val signature = PspSignature(config.psp.secret)
     if (!signature.enabled) {
-        log.warn("PSP signature verification is OFF - set psp.secret before anything real")
+        log.error("no psp.secret: every request will be rejected")
     }
 
     val payments = PaymentService(
@@ -48,7 +53,6 @@ fun Application.ledgerModule(
 
     val refunds = RefundService(
         refunds = RefundRepository(dsl),
-        feePolicy = RefundFeePolicy.of(config.mor.refundFeeReturnedFor),
     )
 
     install(ContentNegotiation) { json(apiJson) }
@@ -60,6 +64,13 @@ fun Application.ledgerModule(
         }
     }
 
-    apiRoutes(LedgerController(payments, refunds, signature))
-    devRoutes(config.server)
+    val processingErrors = ProcessingErrorRepository(dsl)
+    val payoutStore = PayoutRepository(dsl)
+    val payoutCalculation = PayoutCalculationJob(payoutStore, processingErrors)
+    val payoutDisbursement = PayoutDisbursementJob(payoutStore, AcceptingPspPayoutClient())
+
+    PayoutScheduler(payoutCalculation, payoutDisbursement).start(this)
+
+    apiRoutes(LedgerController(payments, refunds, processingErrors, signature))
+    devRoutes(config.server, payoutCalculation, payoutDisbursement)
 }

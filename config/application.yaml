@@ -19,6 +19,7 @@ mor:
   feeBasisPoints: 500  # MOR_FEE_BP
 
 psp:
-  # HMAC secret for capture webhook signatures. Blank disables verification,
-  # which is fine locally and unacceptable anywhere else.
-  secret:              # PSP_SECRET
+  # HMAC-SHA256 secret for webhook signatures. Local development value - the
+  # real one comes from PSP_SECRET and is never committed. Blank rejects every
+  # request: the endpoint fails closed.
+  secret: dev-psp-secret-change-me   # PSP_SECRET

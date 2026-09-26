@@ -7,6 +7,7 @@ components:
         - merchantId
         - amount
         - currency
+        - success
         - cardIssuingCountry
         - paymentTime
       properties:
@@ -20,6 +21,9 @@ components:
           $ref: '#/components/schemas/Amount'
         currency:
           $ref: '#/components/schemas/Currency'
+        success:
+          description: false = the payment did not happen at the PSP. Acknowledged, not stored.
+          type: boolean
         billingAddress:
           $ref: '#/components/schemas/BillingAddress'
         cardIssuingCountry:

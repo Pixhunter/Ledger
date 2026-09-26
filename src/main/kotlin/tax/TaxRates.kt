@@ -1,5 +1,8 @@
 package org.example.tax
 
+// Stub by choice: the task allows the rate on the capture webhook. Production reads
+// mor.tax_rate - keyed by (country, category, valid_from), so a rate change never
+// reprices past payments - which is a repository swap, not a redesign.
 class TaxRates(
     private val rates: Map<String, BasisPoints> = EU_STANDARD,
 ) {

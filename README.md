@@ -130,7 +130,7 @@ sequenceDiagram
     L->>L: idempotency check (pspReference)
     L-->>PSP: duplicate: stored answer
     L->>L: success = false?
-    L-->>PSP: 200, saved FAILED, no money posted
+    L-->>PSP: 200, nothing saved
     L->>L: merchant exists?
     L->>R: no: HELD (UNKNOWN_MERCHANT) + alert
     L->>L: vote country, risk checks
@@ -139,6 +139,12 @@ sequenceDiagram
     L->>L: save payment + ledger entries (one transaction)
     L-->>PSP: 200 received (POSTED or HELD)
 ```
+
+**Failed payments are acknowledged, not stored.** `success = false` means no
+money moved, so there is nothing to post. Storing it would need the
+idempotency key to be the per-attempt PSP id: with an intent or order id the
+same reference can arrive FAILED then SUCCESS, and a stored FAILED row would
+swallow the success. Out of scope; the event is logged.
 
 Why synchronous: split is pure math, posting is a few inserts in the same
 transaction (~1-2 ms). No worker, no retries, balances correct right after
@@ -180,7 +186,7 @@ sequenceDiagram
 
 | Object | States (stored as smallint) |
 |---|---|
-| Payment | 1 `POSTED`, 2 `HELD`, 3 `FAILED` |
+| Payment | 1 `POSTED`, 2 `HELD`, 4 `PARTIALLY_REFUNDED`, 5 `REFUNDED` |
 | Payout | 1 `COMPUTED`, 2 `SENT`, 3 `CONFIRMED` |
 
 Enums are stored as `smallint`, not text: every enum implements `EnumId`
@@ -277,7 +283,7 @@ Responses:
 | 5xx | database down, timeout | PSP retries |
 
 Queued for review: malformed body, same `refundReference` with a different
-body, amount more than left to refund, payment `FAILED`, currency differs,
+body, amount more than left to refund, currency differs,
 `refundedAt` date after today or before the capture date. A PSP retry
 cannot fix these, so we answer 200 to stop pointless retries and keep the
 event for a human.
@@ -341,8 +347,8 @@ sequenceDiagram
     end
 
     L->>L: validate against payment
-    alt payment FAILED / currency differs / refundedAt date before capture date
-        L->>DB: save processing_error (PAYMENT_FAILED / CURRENCY_MISMATCH / INVALID_DATE)
+    alt currency differs / refundedAt date before capture date
+        L->>DB: save processing_error (CURRENCY_MISMATCH / INVALID_DATE)
         L--)R: alert
         L-->>PSP: 200 QUEUED_FOR_REVIEW
     end
@@ -428,21 +434,22 @@ kept   30  -> tax still owed          = 5.00   (the sale still exists for 30)
 
 ### Fee (MoR revenue) on refund
 
-The reason decides whether we return our fee part:
+**The MoR keeps its fee on every refund.** The merchant covers it: the refund
+returns the customer's full amount, the tax goes back to the tax authority, and
+what is left comes out of the merchant's balance. This matches what large MoRs
+do - the processing work was done whether or not the sale stuck.
 
-| Reason | Whose fault | Our fee |
-|---|---|---|
-| `DUPLICATE` | ours (charged twice) | returned |
-| `FRAUD` | ours (fraud checks missed it) | returned |
-| `CUSTOMER_REQUEST` | merchant's refund policy | kept |
-| `PRODUCT_ISSUE` | merchant | kept |
-| `OTHER` / missing | unknown | kept (safe default) |
+The decision is stored on the refund as `fee_returned`, always `false` today.
+It is a column and not a constant because the rule is commercial, and freezing
+it per refund means changing it later never rewrites history.
 
-- The reason -> fee rule lives in **config**, not code.
-- The decision (`fee_returned`) is **stored on the refund**, so a config
-  change never rewrites history.
-- Keeping the fee matches industry practice: large MoRs retain their
-  processing fee on refunds. When the fee is kept, the merchant covers it.
+**Scaling this up:** a real MoR varies it by who is at fault - a duplicate
+charge or fraud we failed to catch is ours, so the fee goes back; a customer
+changing their mind is the merchant's refund policy, so it does not. That needs
+the reason to be trustworthy, and a `reason` field in the webhook body is not:
+the signature proves the PSP sent it, not who wrote it. Production would take
+the reason from the MoR's own refund service, keyed by `refundReference`, not
+from the event. Out of scope here.
 
 ### Writes (one statement, one round trip)
 
@@ -560,19 +567,20 @@ book; `processing_error` is for events we cannot book.
 ```
 processing_error
   id                  uuid          PK
-  event_type          text          CAPTURE / REFUND
+  event_type          smallint      1 CAPTURE, 2 REFUND
   external_reference  text          pspReference or refundReference
   payload             jsonb         raw request, exactly as received
-  error_code          text          see below
+  error_code          smallint      see below
   error_detail        text          human-readable
-  status              text          OPEN / RESOLVED / IGNORED
-  resolution_note     text  null    what the human did
-  resolved_at         timestamptz   null
   created_at          timestamptz
 
   UNIQUE (event_type, external_reference, error_code)  PSP retries do not duplicate rows
-  index (status) WHERE status = 'OPEN'                  review queue
+  index (created_at)                                   oldest first, and age alerts
 ```
+
+Every row is an open problem: resolving one **deletes** it. No status column
+to keep in step, and the whole table is the review queue - its row count is
+the alert.
 
 ### Error codes and resolution
 
@@ -583,21 +591,22 @@ Every error raises an alert. Resolution is **manual** for the task.
 | `MALFORMED` | capture, refund | valid signature, broken body | fix the PSP mapping, replay |
 | `IDEMPOTENCY_CONFLICT` | capture, refund | same reference, different body | compare with the PSP, keep the correct version |
 | `OVER_REFUND` | refund | more than left to refund (e.g. refund + chargeback) | manual request to the PSP, then book or write off |
-| `PAYMENT_FAILED` | refund | refund of a payment whose capture failed | check with the PSP if the capture really failed |
 | `CURRENCY_MISMATCH` | refund | refund currency differs from payment | manual with the PSP |
 | `INVALID_DATE` | refund | refund dated after today or before its payment's day | verify dates with the PSP, replay if valid |
 
-Resolving = the human fixes the cause, sets `status = RESOLVED` (or
-`IGNORED`) with a `resolution_note`. Later: a **replay** action sends the
-stored payload through the same endpoint again; endpoints are idempotent,
-so replay is safe.
+Resolving = the human fixes the cause and deletes the row. There is no
+resolution logic: deletion is manual. A HELD payment also has a row here, so
+releasing it must delete that row in the same transaction, or the queue shows
+a problem that is already fixed. Later: a
+**replay** action sends the stored payload through the same endpoint again
+before deleting; endpoints are idempotent, so replay is safe.
 
 ### Weakness
 
 An open error means money moved at the PSP but **not** in our ledger:
 balances and tax are off by that amount until resolved. Mitigation:
 
-- alert on every new error, and again when one is **open more than 3 days**;
+- alert on every new error, and again when one is **older than 3 days**;
 - the balances report shows "N open errors, total X" next to the balances;
 - daily reconciliation with the PSP settlement report catches anything missed.
 
@@ -668,7 +677,7 @@ erDiagram
     int tax_rate_bps "frozen"
     boolean reverse_charge
     jsonb evidence "country codes only"
-    smallint status "1 POSTED, 2 HELD, 3 FAILED"
+    smallint status "1 POSTED, 2 HELD, 4 PARTIALLY_REFUNDED, 5 REFUNDED"
     smallint hold_reason "1 UNKNOWN_MERCHANT, 2 TAX_UNRESOLVED"
     timestamptz payment_time
     timestamptz created_at
@@ -784,6 +793,12 @@ tax_rate
   rate_bps     int         1900 = 19%
 ```
 
+**Implemented as a constant.** The task allows the rate to come on the capture
+webhook; we derive it from the customer's country instead, from a map of EU
+standard rates. `mor.tax_rate` is created but not read: it is the shape the
+lookup needs in production - versioned by `valid_from`, keyed by category - and
+wiring it is a repository swap, not a redesign.
+
 Lookup for a payment:
 
 ```
@@ -830,7 +845,7 @@ payment
   tax_rate_bps    int           frozen at capture
   reverse_charge  boolean       true -> tax = 0, B2B
   evidence        jsonb         {"billing":"ES","card":"AU","ip":"ES","vatId":null}
-  status          smallint      1 POSTED, 2 HELD, 3 FAILED, only mutable column
+  status          smallint      1 POSTED, 2 HELD, 4 PARTIALLY_REFUNDED, 5 REFUNDED
   hold_reason     smallint null  1 UNKNOWN_MERCHANT, 2 TAX_UNRESOLVED
   payment_time     timestamptz   from PSP
   created_at      timestamptz   when we saved it

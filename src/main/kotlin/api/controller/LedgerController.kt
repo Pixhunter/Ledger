@@ -12,15 +12,21 @@ import org.example.api.mapper.RefundMapper.toModel
 import org.example.api.recorded
 import org.example.api.rejected
 import org.example.api.security.PspSignature
+import org.example.model.ProcessingError
 import org.example.model.RejectReason
+import org.example.model.enums.EventType
+import org.example.repository.ProcessingErrorStore
+import org.example.service.LedgerError
 import org.example.service.LedgerResult
 import org.example.service.PaymentService
 import org.example.service.RefundService
+import java.util.UUID
 import org.slf4j.LoggerFactory
 
 class LedgerController(
     private val payments: PaymentService,
     private val refunds: RefundService,
+    private val errors: ProcessingErrorStore,
     private val signature: PspSignature,
 ) {
     private val log = LoggerFactory.getLogger(LedgerController::class.java)
@@ -36,7 +42,7 @@ class LedgerController(
 
         log.info("payment psp={} merchant={}", request.pspReference, request.merchantId)
 
-        return answer(payments.createPayment(request))
+        return answer(payments.createPayment(request), EventType.CAPTURE, rawBody)
     }
 
     suspend fun createRefund(rawBody: String, signatureHeader: String?): ApiResponse<LedgerResponseDto> {
@@ -50,7 +56,7 @@ class LedgerController(
 
         log.info("refund psp={} refund={}", request.pspReference, request.refundReference)
 
-        return answer(refunds.createRefund(request))
+        return answer(refunds.createRefund(request), EventType.REFUND, rawBody)
     }
 
     private fun <T> parse(rawBody: String, decode: (String) -> T): T? {
@@ -60,14 +66,40 @@ class LedgerController(
         }
     }
 
-    private fun answer(result: LedgerResult): ApiResponse<LedgerResponseDto> = when (result) {
-        is LedgerResult.Recorded,
+    private suspend fun answer(
+        result: LedgerResult,
+        eventType: EventType,
+        rawBody: String,
+    ): ApiResponse<LedgerResponseDto> = when (result) {
+        is LedgerResult.Recorded -> {
+            result.error?.let { record(it, eventType, rawBody) }
+            ApiResponse(HttpStatusCode.OK, recorded())
+        }
+
         is LedgerResult.Duplicate,
         is LedgerResult.NothingToRecord -> ApiResponse(HttpStatusCode.OK, recorded())
 
         is LedgerResult.PaymentNotFound -> failed(HttpStatusCode.NotFound)
         is LedgerResult.Rejected -> failed(HttpStatusCode.BadRequest, result.reason)
+
+        is LedgerResult.NotBookable -> {
+            record(result.error, eventType, rawBody)
+            ApiResponse(HttpStatusCode.OK, recorded())
+        }
     }
+
+    // TODO alert on every row, and again when one is older than 3 days.
+    private suspend fun record(error: LedgerError, eventType: EventType, rawBody: String) =
+        errors.save(
+            ProcessingError(
+                id = UUID.randomUUID(),
+                eventType = eventType,
+                externalReference = error.reference,
+                payload = rawBody,
+                code = error.code,
+                detail = error.detail,
+            )
+        )
 
     private fun failed(
         status: HttpStatusCode,

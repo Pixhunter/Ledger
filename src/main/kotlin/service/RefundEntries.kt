@@ -28,8 +28,14 @@ object RefundEntries {
         val feePart = cumulativeShare(refundedTotal, payment.fee, payment.gross, currency) -
             cumulativeShare(previousTotal, payment.fee, payment.gross, currency)
 
+        // Anything beyond what is left of the payment is not a sale being undone:
+        // it reverses no tax and no fee, and waits in SUSPENSE for a human.
+        val remaining = (payment.gross - previousTotal).max(Money.ZERO)
+        val withinSale = refund.amount.min(remaining)
+        val excess = refund.amount - withinSale
+
         val revenuePart = if (refund.feeReturned) feePart else Money.ZERO
-        val merchantPart = refund.amount - taxPart - revenuePart
+        val merchantPart = withinSale - taxPart - revenuePart
 
         add(LedgerEntry(PaymentPurpose.PSP, null, -refund.amount, currency))
 
@@ -47,6 +53,17 @@ object RefundEntries {
                     purpose = if (payment.holdReason != null) PaymentPurpose.HELD else PaymentPurpose.MERCHANT,
                     purposeKey = payment.merchantId?.toString(),
                     amount = merchantPart,
+                    currency = currency,
+                )
+            )
+        }
+
+        if (!Money.isZero(excess)) {
+            add(
+                LedgerEntry(
+                    purpose = PaymentPurpose.SUSPENSE,
+                    purposeKey = payment.merchantId?.toString(),
+                    amount = excess,
                     currency = currency,
                 )
             )

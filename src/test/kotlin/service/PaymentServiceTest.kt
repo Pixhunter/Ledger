@@ -129,6 +129,7 @@ class PaymentServiceTest {
         merchantId = merchantId,
         amount = amount,
         currency = Currency.EUR,
+        success = true,
         billingCountry = country,
         stateOrProvince = null,
         cardIssuingCountry = country,

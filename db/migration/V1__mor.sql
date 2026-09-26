@@ -33,6 +33,7 @@ CREATE TABLE mor.merchant
 CREATE TABLE mor.merchant_payment_details
 (
     merchant_id    uuid        PRIMARY KEY REFERENCES mor.merchant (id),
+    psp_account_id text        NOT NULL,             -- the PSP's id for the payout destination; we never send ours
     account_holder text        NOT NULL,             -- every bank transfer needs it
     iban           text        NULL,                 -- EU / UK
     bic            text        NULL,
@@ -95,14 +96,14 @@ CREATE TABLE mor.payment
     tax_rate_bps   int         NULL,                 -- frozen when recorded
     reverse_charge boolean     NOT NULL DEFAULT false,
     evidence       jsonb       NOT NULL,             -- {"billing":"ES","card":"AU","ip":"ES","vatId":null}
-    status         smallint    NOT NULL,             -- PaymentStatus: 1 POSTED, 2 HELD, 3 FAILED
+    status         smallint    NOT NULL,             -- PaymentStatus: 1 POSTED, 2 HELD
     hold_reason    smallint    NULL,                 -- HoldReason: 1 UNKNOWN_MERCHANT, 2 TAX_UNRESOLVED
     payment_time   timestamptz NOT NULL,             -- from the PSP: the tax point
     created_at     timestamptz NOT NULL DEFAULT now(),
 
     CONSTRAINT payment_split_ck    CHECK (gross = tax + fee + merchant_net),
     CONSTRAINT payment_amounts_ck  CHECK (gross > 0 AND tax >= 0 AND fee >= 0 AND merchant_net >= 0),
-    CONSTRAINT payment_status_ck   CHECK (status IN (1, 2, 3)),
+    CONSTRAINT payment_status_ck   CHECK (status IN (1, 2)),
     CONSTRAINT payment_hold_ck     CHECK ((status = 2) = (hold_reason IS NOT NULL)),
     CONSTRAINT payment_currency_ck CHECK (currency ~ '^[A-Z]{3}$'),
     CONSTRAINT payment_country_ck  CHECK (tax_country IS NULL OR tax_country ~ '^[A-Z]{2}$')
@@ -146,13 +147,13 @@ CREATE TABLE mor.ledger_entry
 (
     id             bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     transaction_id uuid   NOT NULL REFERENCES mor.ledger_transaction (id),
-    purpose        smallint NOT NULL,                -- PaymentPurpose: 1 PSP, 2 TAX, 3 REVENUE, 4 MERCHANT, 5 HELD
-    purpose_key    text   NULL,                      -- TAX: country, MERCHANT/HELD: merchant id
+    purpose        smallint NOT NULL,                -- PaymentPurpose: 1 PSP, 2 TAX, 3 REVENUE, 4 MERCHANT, 5 HELD, 6 SUSPENSE
+    purpose_key    text   NULL,                      -- TAX: country, MERCHANT/HELD/SUSPENSE: merchant id
     amount         numeric(19,4) NOT NULL,           -- major units, signed: + debit, - credit
     currency       text   NOT NULL,
 
     CONSTRAINT ledger_entry_amount_ck   CHECK (amount <> 0),
-    CONSTRAINT ledger_entry_purpose_ck  CHECK (purpose IN (1, 2, 3, 4, 5)),
+    CONSTRAINT ledger_entry_purpose_ck  CHECK (purpose IN (1, 2, 3, 4, 5, 6)),
     CONSTRAINT ledger_entry_currency_ck CHECK (currency ~ '^[A-Z]{3}$')
 );
 
@@ -175,6 +176,7 @@ CREATE TABLE mor.payout
     currency              text        NOT NULL,
     ledger_transaction_id uuid        NOT NULL REFERENCES mor.ledger_transaction (id),
     status                smallint    NOT NULL,      -- PayoutStatus: 1 COMPUTED, 2 SENT, 3 CONFIRMED
+    psp_reference         text        NULL,          -- the PSP's id for the transfer, set when sent
     created_at            timestamptz NOT NULL DEFAULT now(),
 
     PRIMARY KEY (merchant_id, payout_date),
@@ -185,3 +187,29 @@ CREATE TABLE mor.payout
 );
 
 CREATE INDEX payout_date_idx ON mor.payout (payout_date);
+
+
+-- ---------------------------------------------------------------------------
+-- merchant_daily_balance: what each merchant was owed at the end of a business
+-- day, before payout. Append-only, written by the payout calculation for every
+-- merchant - positive, zero or negative.
+--
+-- The ledger stays the source of truth; this is a snapshot. It exists so
+-- "negative for N days in a row" is one indexed read instead of replaying
+-- every entry.
+-- ---------------------------------------------------------------------------
+CREATE TABLE mor.merchant_daily_balance
+(
+    merchant_id  uuid          NOT NULL REFERENCES mor.merchant (id),
+    balance_date date          NOT NULL,             -- London business date
+    balance      numeric(19,4) NOT NULL,             -- signed, before payout
+    currency     text          NOT NULL,
+    created_at   timestamptz   NOT NULL DEFAULT now(),
+
+    PRIMARY KEY (merchant_id, balance_date),
+
+    CONSTRAINT mdb_currency_ck CHECK (currency ~ '^[A-Z]{3}$')
+);
+
+CREATE INDEX merchant_daily_balance_idx
+    ON mor.merchant_daily_balance (merchant_id, balance_date DESC);

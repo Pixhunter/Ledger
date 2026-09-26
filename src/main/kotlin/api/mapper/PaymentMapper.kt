@@ -30,6 +30,7 @@ object PaymentMapper {
             merchantId = merchantId.toUuid("merchantId"),
             amount = Money.amount(amount, domainCurrency),
             currency = domainCurrency,
+            success = success,
             billingCountry = billingAddress?.country?.toCountry("billingAddress.country"),
             stateOrProvince = billingAddress?.stateOrProvince,
             cardIssuingCountry = cardIssuingCountry.toCountry("cardIssuingCountry"),

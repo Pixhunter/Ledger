@@ -10,8 +10,8 @@ ledger service.
 - Customer eligibility and refund decisions happen before the ledger.
 - The ledger still owns tax, revenue and merchant accounting allocation.
 - One currency (EUR) but several countries with different taxes (one country - one tax).
-- Full and partial refunds can retain or return MoR revenue.
-- Unknown merchant or tax data is saved as `HELD` for manual review.
+- Full and partial refunds keep MoR revenue; returning it by reason is a later step.
+- Unknown merchant or tax data is saved as `HELD` and queued for manual review.
 - A negative merchant balance is carried forward. Alert after 14 days.
 - Production errors need a durable exception queue and manual resolution.
 - Fraud operation just alerting - not skipped
@@ -23,13 +23,17 @@ ledger service.
 An authenticated, readable capture is accepted because the customer was already
 charged.
 
-| Event                          | Result                                          |
-|--------------------------------|-------------------------------------------------|
-| Known merchant and tax         | `SUCCESS`: tax + MoR revenue + merchant balance |
-| Unknown merchant or tax        | Save as `HELD`; manual review                   |
-| Exact retry                    | Return `200`; write nothing                     |
-| Same reference, different data | Keep the first event; manual exception          |
-| Bad signature/body             | Return `401`/`400`                              |
+| Event                          | Result                                                 |
+|--------------------------------|--------------------------------------------------------|
+| Known merchant and tax         | `SUCCESS`: tax + MoR revenue + merchant balance        |
+| Unknown merchant or tax        | Save as `HELD`; write an exception; manual review      |
+| `success = false` at the PSP   | Return `200`; write nothing                            |
+| Exact retry                    | Return `200`; write nothing                            |
+| Same reference, different data | Keep the first event; write an exception; no second row |
+| Bad signature/body             | Return `401`/`400`                                     |
+
+The merchant allowlist is empty until `mor.merchant` is read, so every capture
+is `HELD` today. The rule is implemented; the source of merchants is not.
 
 ## Refunds
 
@@ -40,21 +44,27 @@ refunds are supported.
 |-------------------------------------|------------------------------------------------------------------------|
 | Missing payment                     | Return `404`; retry after payment arrives                              |
 | Exact retry                         | Return `200`; write nothing                                            |
-| Same reference, different data      | Keep the first event; manual exception                                 |
-| Total refunds exceed payment amount | Save full refund; close payment; post excess to `OVER_REFUND_SUSPENSE` |
+| Same reference, different data      | Keep the first event; write an exception; no second row                |
+| Total refunds exceed payment amount | Save full refund; close payment; post excess to `SUSPENSE`; write an exception |
 | Bad signature/body                  | Return `401`/`400`                                                     |
 
-| Revenue policy | Partial refund                  | Full refund     | Reasons today                          |
-|----------------|---------------------------------|-----------------|----------------------------------------|
-| Keep fee       | Merchant funds refund after tax | Keep full fee   | Customer request, product issue, other |
-| Return fee     | Return proportional fee         | Return full fee | Duplicate, fraud                       |
+| Revenue policy   | Partial refund                  | Full refund   | Today                         |
+|------------------|---------------------------------|---------------|-------------------------------|
+| Keep fee         | Merchant funds refund after tax | Keep full fee | Always                        |
+| Return fee       | Return proportional fee         | Return full fee | Not implemented - see below |
+
+Returning the fee depends on who is at fault, and the `reason` in the webhook
+body cannot carry that: the signature proves the PSP sent it, not who wrote it.
+Production takes the reason from the MoR's own refund service. `fee_returned`
+is stored per refund, so switching later never rewrites history.
 
 For an over-refund, return `200` after saving three linked facts: the complete
-refund, balanced ledger entries with the excess in `OVER_REFUND_SUSPENSE`, and
+refund, balanced ledger entries with the excess in `SUSPENSE`, and
 a manual exception. Tax, revenue and merchant balances are never reversed past
 their original amounts. An operator later moves suspense to PSP receivable,
-merchant receivable or MoR loss. Suspense and the exception queue are planned;
-the current code only records and logs the over-refund.
+merchant receivable or MoR loss with a new ledger transaction, then deletes the
+exception row. Implemented: the refund, the `SUSPENSE` entries and the exception
+row. Not implemented: the operator action that clears them.
 
 ## Settlement and controls
 
@@ -79,12 +89,15 @@ Hourly payout is a later option. It changes scheduling, not accounting.
 
 ## Architecture status
 
-**Works now:** synchronous posting, idempotency, balanced entries, held payments,
-cumulative refunds, concurrent-refund serialization, and exact decimal money.
+**Works now:** synchronous posting, idempotency with conflict detection,
+balanced entries, held payments, cumulative refunds, concurrent-refund
+serialization, exact decimal money, over-refund suspense, and the
+`processing_error` exception queue.
 
-**Missing for production:** raw-event inbox, suspense/exception workflow,
-payout worker, negative-balance recovery, tax feed/cache, tax payment, PSP
-reconciliation, database failover and load tests.
+**Missing for production:** merchant table, alert delivery, exception
+resolution and replay, payout worker, negative-balance recovery, tax feed and
+versioned rates, tax payment, PSP reconciliation, database failover and load
+tests.
 
 ## Expected scale
 

@@ -1,6 +1,6 @@
 -- Refund flow.
 ALTER TABLE mor.payment DROP CONSTRAINT payment_status_ck;
-ALTER TABLE mor.payment ADD CONSTRAINT payment_status_ck CHECK (status IN (1, 2, 3, 4, 5));
+ALTER TABLE mor.payment ADD CONSTRAINT payment_status_ck CHECK (status IN (1, 2, 4, 5));
 ALTER TABLE mor.payment DROP CONSTRAINT payment_hold_ck;
 ALTER TABLE mor.payment ADD CONSTRAINT payment_hold_ck CHECK (status <> 2 OR hold_reason IS NOT NULL);
 

@@ -10,6 +10,7 @@ data class PaymentModel(
     val merchantId: UUID,
     val amount: BigDecimal,           // major units, tax-inclusive
     val currency: Currency,
+    val success: Boolean,
     val billingCountry: String?,
     val stateOrProvince: String?,
     val cardIssuingCountry: String,

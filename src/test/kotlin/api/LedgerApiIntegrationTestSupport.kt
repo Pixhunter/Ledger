@@ -20,10 +20,15 @@ import java.math.BigDecimal
 import java.time.Instant
 import java.time.temporal.ChronoUnit
 import java.util.UUID
+import javax.crypto.Mac
+import javax.crypto.spec.SecretKeySpec
+import org.example.config.AppConfig
+import org.example.config.PspConfig
 
 abstract class LedgerApiIntegrationTestSupport : PostgresTest() {
 
     protected val merchantId: UUID = UUID.randomUUID()
+    protected fun testConfig() = AppConfig(psp = PspConfig(PSP_SECRET))
     protected val pspReference = "psp-${UUID.randomUUID()}"
     protected val refundReference = "ref-${UUID.randomUUID()}"
     private val paymentTime: Instant = Instant.now().minus(1, ChronoUnit.HOURS)
@@ -37,12 +42,14 @@ abstract class LedgerApiIntegrationTestSupport : PostgresTest() {
         cardIssuingCountry: String = "ES",
         ipCountry: String? = "ES",
         customerVatId: String? = null,
+        success: Boolean = true,
     ) = """
         {
           "pspReference": "$pspReference",
           "merchantId": "$merchantId",
           "amount": $amount,
           "currency": "EUR",
+          "success": $success,
           "billingAddress": ${billingCountry?.let { """{ "country": "$it" }""" } ?: "null"},
           "cardIssuingCountry": "$cardIssuingCountry",
           "ipCountry": ${ipCountry?.let { """"$it"""" } ?: "null"},
@@ -69,10 +76,16 @@ abstract class LedgerApiIntegrationTestSupport : PostgresTest() {
         }
     """.trimIndent()
 
+    protected fun sign(body: String): String {
+        val mac = Mac.getInstance("HmacSHA256")
+            .apply { init(SecretKeySpec(PSP_SECRET.toByteArray(), "HmacSHA256")) }
+        return mac.doFinal(body.toByteArray()).joinToString("") { "%02x".format(it) }
+    }
+
     protected suspend fun ApplicationTestBuilder.send(
         path: String,
         body: String,
-        signature: String? = null,
+        signature: String? = sign(body),
     ): HttpResponse =
         client.post(path) {
             contentType(ContentType.Application.Json)
@@ -111,6 +124,10 @@ abstract class LedgerApiIntegrationTestSupport : PostgresTest() {
 
     protected fun List<Pair<PaymentPurpose, BigDecimal>>.balance(purpose: PaymentPurpose): BigDecimal =
         filter { it.first == purpose }.fold(money("0")) { total, entry -> total + entry.second }
+
+    protected companion object {
+        const val PSP_SECRET = "test-psp-secret"
+    }
 
     protected data class DatabaseSnapshot(
         val payments: List<List<Any?>>,

@@ -3,15 +3,37 @@ package org.example.api.controller
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
+import io.ktor.server.request.receiveText
 import io.ktor.server.response.respond
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.get
+import io.ktor.server.routing.post
 import io.ktor.server.routing.routing
 import org.example.config.ServerConfig
+import org.example.payout.PayoutCalculationJob
+import org.example.payout.PayoutDisbursementJob
 import java.io.File
+import java.time.LocalDate
 
-fun Application.devRoutes(server: ServerConfig) {
+fun Application.devRoutes(
+    server: ServerConfig,
+    payoutCalculation: PayoutCalculationJob,
+    payoutDisbursement: PayoutDisbursementJob,
+) {
     routing {
+
+        // Manual triggers for the scheduled jobs. Operational only.
+        post("/v1/payouts/compute") {
+            val date = call.request.queryParameters["date"]
+                ?.let { LocalDate.parse(it) }
+                ?: LocalDate.now().minusDays(1)
+
+            call.respond(HttpStatusCode.OK, mapOf("computed" to payoutCalculation.run(date)))
+        }
+
+        post("/v1/payouts/send") {
+            call.respond(HttpStatusCode.OK, mapOf("sent" to payoutDisbursement.run()))
+        }
 
         get("/health") {
             call.respond(HttpStatusCode.OK, mapOf("status" to "UP"))

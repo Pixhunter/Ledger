@@ -1,0 +1,66 @@
+package org.example.payout
+
+import org.example.model.ProcessingError
+import org.example.model.enums.EventType
+import org.example.model.enums.ProcessingErrorCode
+import org.example.repository.ProcessingErrorStore
+import org.slf4j.LoggerFactory
+import java.math.BigDecimal
+import java.time.LocalDate
+import java.util.UUID
+
+/**
+ * Closes the day: snapshots every merchant's balance, then turns the positive
+ * ones into payout rows. No external calls, so it can be re-run safely - the
+ * (merchant, date) key makes a second run a no-op.
+ *
+ * A negative balance is carried forward, not paid: future sales settle it.
+ * After NEGATIVE_DAYS_LIMIT days in the red it stops being a rounding artefact
+ * and becomes a debt someone has to collect, so it goes to the review queue.
+ */
+class PayoutCalculationJob(
+    private val payouts: PayoutStore,
+    private val errors: ProcessingErrorStore,
+    private val negativeDaysLimit: Int = NEGATIVE_DAYS_LIMIT,
+) {
+    private val log = LoggerFactory.getLogger(PayoutCalculationJob::class.java)
+
+    suspend fun run(payoutDate: LocalDate): Int {
+        var computed = 0
+
+        payouts.balances().forEach { balance ->
+            payouts.recordDailyBalance(balance, payoutDate)
+
+            when {
+                balance.amount.signum() > 0 ->
+                    if (payouts.computePayout(balance, payoutDate)) computed++
+                    else log.info("payout for {} on {} already computed", balance.merchantId, payoutDate)
+
+                balance.amount.signum() < 0 -> reportIfOverdue(balance.merchantId, balance.amount, payoutDate)
+            }
+        }
+
+        log.info("payout run {}: {} computed", payoutDate, computed)
+        return computed
+    }
+
+    private suspend fun reportIfOverdue(merchantId: UUID, balance: BigDecimal, payoutDate: LocalDate) {
+        val days = payouts.consecutiveNegativeDays(merchantId, payoutDate)
+        if (days < negativeDaysLimit) return
+
+        errors.save(
+            ProcessingError(
+                id = UUID.randomUUID(),
+                eventType = EventType.PAYOUT,
+                externalReference = "$merchantId-$payoutDate",
+                payload = """{"merchantId":"$merchantId","balance":"$balance","negativeDays":$days}""",
+                code = ProcessingErrorCode.NEGATIVE_BALANCE,
+                detail = "$days consecutive negative days, balance $balance",
+            )
+        )
+    }
+
+    private companion object {
+        const val NEGATIVE_DAYS_LIMIT = 14
+    }
+}

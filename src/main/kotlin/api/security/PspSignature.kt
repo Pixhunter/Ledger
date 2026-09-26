@@ -13,14 +13,15 @@ import javax.crypto.spec.SecretKeySpec
  *  - the RAW bytes are signed, not a re-serialised object; re-encoding
  *    changes whitespace and key order and the signature stops matching
  *  - constant-time comparison, so an attacker cannot time-probe the digest
+ *
+ * Fails closed: no secret means every request is rejected.
  */
 class PspSignature(private val secret: String?) {
 
     val enabled: Boolean get() = !secret.isNullOrBlank()
 
     fun verify(rawBody: ByteArray, header: String?): Boolean {
-        if (!enabled) return true          // local runs
-        if (header.isNullOrBlank()) return false
+        if (!enabled || header.isNullOrBlank()) return false
 
         val mac = Mac.getInstance(ALGORITHM).apply {
             init(SecretKeySpec(secret!!.toByteArray(), ALGORITHM))

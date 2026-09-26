@@ -9,6 +9,7 @@ import org.example.jooq.tables.references.LEDGER_TRANSACTION
 import org.example.jooq.tables.references.PAYMENT
 import org.example.jooq.tables.references.REFUND
 import org.example.ledgerModule
+import org.example.service.MerchantRegistry
 import org.example.model.enumById
 import org.example.model.enums.HoldReason
 import org.example.model.enums.LedgerTransactionType
@@ -24,7 +25,7 @@ class RefundApiIntegrationTest : LedgerApiIntegrationTestSupport() {
 
     @Test
     fun `a captured payment refunded in full leaves two ledger transactions and a zero balance`() = testApplication {
-        application { ledgerModule(AppConfig(), dsl) }
+        application { ledgerModule(testConfig(), dsl, MerchantRegistry(setOf(merchantId))) }
 
         assertEquals(HttpStatusCode.OK, send(PAYMENT_CAPTURE_ENDPOINT, paymentBody()).status)
 
@@ -82,7 +83,7 @@ class RefundApiIntegrationTest : LedgerApiIntegrationTestSupport() {
 
     @Test
     fun `refund before payment is rejected and succeeds when retried after payment arrives`() = testApplication {
-        application { ledgerModule(AppConfig(), dsl) }
+        application { ledgerModule(testConfig(), dsl, MerchantRegistry(setOf(merchantId))) }
 
         val body = refundBody()
         val databaseBeforeRefund = databaseSnapshot()
@@ -127,7 +128,7 @@ class RefundApiIntegrationTest : LedgerApiIntegrationTestSupport() {
 
     @Test
     fun `duplicate refund returns OK and writes refund only once`() = testApplication {
-        application { ledgerModule(AppConfig(), dsl) }
+        application { ledgerModule(testConfig(), dsl, MerchantRegistry(setOf(merchantId))) }
 
         assertEquals(HttpStatusCode.OK, send(PAYMENT_CAPTURE_ENDPOINT, paymentBody()).status)
 
@@ -163,7 +164,7 @@ class RefundApiIntegrationTest : LedgerApiIntegrationTestSupport() {
 
     @Test
     fun `partial refund updates status and reverses tax proportionally`() = testApplication {
-        application { ledgerModule(AppConfig(), dsl) }
+        application { ledgerModule(testConfig(), dsl, MerchantRegistry(setOf(merchantId))) }
 
         assertEquals(HttpStatusCode.OK, send(PAYMENT_CAPTURE_ENDPOINT, paymentBody()).status)
         assertEquals(
@@ -189,7 +190,7 @@ class RefundApiIntegrationTest : LedgerApiIntegrationTestSupport() {
 
     @Test
     fun `partial fraud refund returns revenue proportionally`() = testApplication {
-        application { ledgerModule(AppConfig(), dsl) }
+        application { ledgerModule(testConfig(), dsl, MerchantRegistry(setOf(merchantId))) }
 
         assertEquals(HttpStatusCode.OK, send(PAYMENT_CAPTURE_ENDPOINT, paymentBody()).status)
         assertEquals(
@@ -214,7 +215,7 @@ class RefundApiIntegrationTest : LedgerApiIntegrationTestSupport() {
 
     @Test
     fun `multiple partial refunds finish as fully refunded without rounding remainder`() = testApplication {
-        application { ledgerModule(AppConfig(), dsl) }
+        application { ledgerModule(testConfig(), dsl, MerchantRegistry(setOf(merchantId))) }
 
         assertEquals(HttpStatusCode.OK, send(PAYMENT_CAPTURE_ENDPOINT, paymentBody()).status)
 
@@ -270,7 +271,7 @@ class RefundApiIntegrationTest : LedgerApiIntegrationTestSupport() {
 
     @Test
     fun `one thousand one-cent refunds cumulatively return all tax on a ten-euro payment`() = testApplication {
-        application { ledgerModule(AppConfig(), dsl) }
+        application { ledgerModule(testConfig(), dsl, MerchantRegistry(setOf(merchantId))) }
 
         assertEquals(
             HttpStatusCode.OK,
@@ -319,7 +320,7 @@ class RefundApiIntegrationTest : LedgerApiIntegrationTestSupport() {
 
     @Test
     fun `unsuccessful PSP refund returns OK and writes nothing`() = testApplication {
-        application { ledgerModule(AppConfig(), dsl) }
+        application { ledgerModule(testConfig(), dsl, MerchantRegistry(setOf(merchantId))) }
 
         assertEquals(HttpStatusCode.OK, send(PAYMENT_CAPTURE_ENDPOINT, paymentBody()).status)
         val databaseBeforeRefund = databaseSnapshot()
@@ -335,7 +336,7 @@ class RefundApiIntegrationTest : LedgerApiIntegrationTestSupport() {
 
     @Test
     fun `fraud refund returns the MoR fee`() = testApplication {
-        application { ledgerModule(AppConfig(), dsl) }
+        application { ledgerModule(testConfig(), dsl, MerchantRegistry(setOf(merchantId))) }
 
         assertEquals(HttpStatusCode.OK, send(PAYMENT_CAPTURE_ENDPOINT, paymentBody()).status)
         assertEquals(
@@ -356,7 +357,7 @@ class RefundApiIntegrationTest : LedgerApiIntegrationTestSupport() {
 
     @Test
     fun `missing refund reason defaults to OTHER and keeps the fee`() = testApplication {
-        application { ledgerModule(AppConfig(), dsl) }
+        application { ledgerModule(testConfig(), dsl, MerchantRegistry(setOf(merchantId))) }
 
         assertEquals(HttpStatusCode.OK, send(PAYMENT_CAPTURE_ENDPOINT, paymentBody()).status)
         assertEquals(
@@ -372,7 +373,7 @@ class RefundApiIntegrationTest : LedgerApiIntegrationTestSupport() {
 
     @Test
     fun `product issue refund keeps the MoR fee`() = testApplication {
-        application { ledgerModule(AppConfig(), dsl) }
+        application { ledgerModule(testConfig(), dsl, MerchantRegistry(setOf(merchantId))) }
 
         assertEquals(HttpStatusCode.OK, send(PAYMENT_CAPTURE_ENDPOINT, paymentBody()).status)
         assertEquals(
@@ -388,7 +389,7 @@ class RefundApiIntegrationTest : LedgerApiIntegrationTestSupport() {
 
     @Test
     fun `refund of held payment reverses the held balance`() = testApplication {
-        application { ledgerModule(AppConfig(), dsl) }
+        application { ledgerModule(testConfig(), dsl, MerchantRegistry(setOf(merchantId))) }
 
         val heldPaymentBody = paymentBody(
             billingCountry = "JP",
@@ -434,7 +435,7 @@ class RefundApiIntegrationTest : LedgerApiIntegrationTestSupport() {
 
     @Test
     fun `refund amount with fractions of a cent is rejected`() = testApplication {
-        application { ledgerModule(AppConfig(), dsl) }
+        application { ledgerModule(testConfig(), dsl, MerchantRegistry(setOf(merchantId))) }
         assertEquals(HttpStatusCode.OK, send(PAYMENT_CAPTURE_ENDPOINT, paymentBody()).status)
         val databaseBeforeRefund = databaseSnapshot()
 

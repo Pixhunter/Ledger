@@ -70,16 +70,27 @@ class PaymentRepository(private val dsl: DSLContext) : PaymentStore {
                 // identically - the PSP must never get two different answers
                 // for one payment.
                 val existing = db
-                    .select(PAYMENT.STATUS, PAYMENT.HOLD_REASON)
-                    .from(PAYMENT)
+                    .selectFrom(PAYMENT)
                     .where(PAYMENT.PSP_REFERENCE.eq(payment.pspReference))
                     .fetchOne()
                     ?: error("psp_reference ${payment.pspReference} conflicted but cannot be read back")
 
+                // A replay is only a replay if it says the same thing. The unique
+                // index proves the reference was seen, not that the money matches.
+                if (existing.merchantId != payment.merchantId ||
+                    existing.gross.compareTo(payment.gross) != 0 ||
+                    existing.currency != payment.currency.name
+                ) {
+                    return@transactionResult LedgerWrite.Conflict(
+                        "stored ${existing.gross} ${existing.currency} for merchant ${existing.merchantId}, " +
+                            "received ${payment.gross} ${payment.currency} for merchant ${payment.merchantId}"
+                    )
+                }
+
                 log.info("replay of {}, nothing written", payment.pspReference)
 
                 return@transactionResult LedgerWrite.Duplicate(
-                    enumById<PaymentStatus>(existing[PAYMENT.STATUS]!!)
+                    enumById<PaymentStatus>(existing.status)
                 )
             }
 

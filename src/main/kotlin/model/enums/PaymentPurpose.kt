@@ -8,4 +8,5 @@ enum class PaymentPurpose(override val id: Short) : EnumId {
     REVENUE(3),
     MERCHANT(4),
     HELD(5),
+    SUSPENSE(6),
 }
