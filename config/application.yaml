@@ -17,9 +17,15 @@ mor:
   country: DE          # MOR_COUNTRY
   # Flat fee on the gross, basis points. 500 = 5.00%.
   feeBasisPoints: 500  # MOR_FEE_BP
+  # Merchants inserted or refreshed at startup. Blank in production: merchants
+  # come from the onboarding service, not from a file in the jar.
+  merchantSeedResource: merchants.json
 
 psp:
   # HMAC-SHA256 secret for webhook signatures. Local development value - the
   # real one comes from PSP_SECRET and is never committed. Blank rejects every
   # request: the endpoint fails closed.
   secret: dev-psp-secret-change-me   # PSP_SECRET
+  # Swagger cannot sign the body it is about to send, so locally the header
+  # may be the secret itself. No header is still 401. Never true in production.
+  allowSecretHeader: true            # PSP_ALLOW_SECRET_HEADER

@@ -46,6 +46,7 @@ data class AppConfig(
             ),
             psp = psp.copy(
                 secret = env("PSP_SECRET") ?: psp.secret,
+                allowSecretHeader = env("PSP_ALLOW_SECRET_HEADER")?.toBoolean() ?: psp.allowSecretHeader,
             ),
             database = database.copy(
                 url = env("DB_URL") ?: database.url,
@@ -84,10 +85,17 @@ data class MorConfig(
     val country: String = "DE",
     /** Flat MoR fee on the gross, basis points. 500 = 5.00%. */
     val feeBasisPoints: Int = 500,
+    /**
+     * Classpath file of merchants to insert or refresh at startup. Blank in
+     * production, where merchants come from the onboarding service.
+     */
+    val merchantSeedResource: String? = "merchants.json",
 )
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class PspConfig(
-    /** HMAC secret for capture webhook signatures. Blank disables the check. */
+    /** HMAC secret for webhook signatures. */
     val secret: String? = null,
+    /** Local only: also accept the secret itself as the header, so Swagger can authorise. */
+    val allowSecretHeader: Boolean = false,
 )

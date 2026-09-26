@@ -1,0 +1,223 @@
+openapi: 3.1.0
+
+info:
+  title: MoR Ledger dev API
+  version: 0.1.0
+  description: |
+    Operational endpoints. Not part of the PSP contract.
+
+    The payout and tax jobs run on a schedule (Europe/London): 00:00 payout
+    close, 01:00 payout send, 01:30 tax balance monitor, 02:00 tax close on the
+    5th, 03:00 tax send. These endpoints trigger the same jobs by hand so a
+    whole month can be exercised in a minute.
+
+    Everything here is idempotent: a second call for the same day or period
+    computes nothing and pays nobody twice. Bind this elsewhere or drop it in
+    production - nothing here should be reachable from where the PSP calls in.
+
+servers:
+  - url: http://localhost:8081
+    description: local
+
+paths:
+
+  /v1/payouts/compute:
+    post:
+      tags: [ payouts ]
+      summary: Close the day for every merchant
+      description: |
+        Closes today (Europe/London). Snapshots each merchant's balance into
+        `merchant_daily_balance`, then turns positive balances into a `payout`
+        row plus a PAYOUT ledger transaction. Negative balances are carried
+        forward, and one negative for 14 days in a row is written to the review
+        queue.
+
+        The scheduled run closes yesterday at 00:00; this one closes today, so
+        a capture made a minute ago is included.
+      operationId: computePayouts
+      responses:
+        '200':
+          description: Closed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PayoutRun'
+              example:
+                payoutDate: '2026-09-26'
+                merchants: 2
+                totalAmount: '211.30'
+                payouts:
+                  - merchantId: 1a1e7d6c-0000-4000-8000-000000000001
+                    merchantName: Aurora SaaS
+                    payments: 10
+                    amount: '97.00'
+                  - merchantId: 2b2e7d6c-0000-4000-8000-000000000002
+                    merchantName: Baltic Courses
+                    payments: 4
+                    amount: '114.30'
+
+  /v1/payouts/send:
+    post:
+      tags: [ payouts ]
+      summary: Send computed payouts to the PSP
+      description: |
+        Sends every payout still in `COMPUTED` to the merchant's PSP account.
+        A payout the PSP rejects stays `COMPUTED` and is retried on the next
+        run; the reference is the idempotency key, so a retry cannot pay twice.
+      operationId: sendPayouts
+      responses:
+        '200':
+          description: Sent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SendResult'
+              example:
+                sent: 3
+
+  /v1/tax-remittances/compute:
+    post:
+      tags: [ tax ]
+      summary: File one month for every country
+      description: |
+        Files the current month (Europe/London) for every country that still
+        owes tax. Turns each country's outstanding TAX balance into a `tax_remittance`
+        row plus a ledger transaction. Refunds inside the period have already
+        reduced that balance. A country at zero or below is skipped: more was
+        refunded than sold, and the credit reduces the next period.
+      operationId: computeTaxRemittances
+      responses:
+        '200':
+          description: Filed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaxRun'
+              example:
+                period: '2026-09-01'
+                countries: 2
+                totalAmount: '40.00'
+                remittances:
+                  - country: DE
+                    payments: 6
+                    ratePercent: '19.00'
+                    amount: '19.00'
+                  - country: ES
+                    payments: 3
+                    ratePercent: '21.00'
+                    amount: '21.00'
+
+  /v1/tax-remittances/send:
+    post:
+      tags: [ tax ]
+      summary: Pay filed remittances to the tax authorities
+      description: |
+        Sends every remittance still in `COMPUTED`. A rejected one stays
+        `COMPUTED` for the next run.
+      operationId: sendTaxRemittances
+      responses:
+        '200':
+          description: Sent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SendResult'
+              example:
+                sent: 12
+
+  /health:
+    get:
+      tags: [ ops ]
+      summary: Liveness
+      operationId: health
+      responses:
+        '200':
+          description: Up
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+              example:
+                status: UP
+
+components:
+  schemas:
+
+    PayoutRun:
+      description: What this run paid out. An empty list means nothing was owed, or the day was already closed.
+      type: object
+      required: [ payoutDate, merchants, totalAmount, payouts ]
+      properties:
+        payoutDate:
+          type: string
+          format: date
+        merchants:
+          type: integer
+          format: int32
+        totalAmount:
+          description: Sum of every payout below, in EUR.
+          type: string
+        payouts:
+          type: array
+          items:
+            type: object
+            required: [ merchantId, merchantName, payments, amount ]
+            properties:
+              merchantId:
+                type: string
+                format: uuid
+              merchantName:
+                type: string
+              payments:
+                description: Captures recorded for this merchant so far.
+                type: integer
+                format: int32
+              amount:
+                description: Paid to the merchant, in EUR.
+                type: string
+
+    TaxRun:
+      description: What this run filed. An empty list means nothing was owed, or the period was already filed.
+      type: object
+      required: [ period, countries, totalAmount, remittances ]
+      properties:
+        period:
+          type: string
+          format: date
+        countries:
+          type: integer
+          format: int32
+        totalAmount:
+          description: Sum of every remittance below, in EUR.
+          type: string
+        remittances:
+          type: array
+          items:
+            type: object
+            required: [ country, payments, ratePercent, amount ]
+            properties:
+              country:
+                type: string
+              payments:
+                description: Captures taxed in this country so far.
+                type: integer
+                format: int32
+              ratePercent:
+                description: Standard rate applied, in percent.
+                type: string
+              amount:
+                description: Owed to this tax authority, in EUR.
+                type: string
+
+    SendResult:
+      description: How many were accepted. Rejected ones stay COMPUTED and are retried.
+      type: object
+      required: [ sent ]
+      properties:
+        sent:
+          type: integer
+          format: int32
+          minimum: 0

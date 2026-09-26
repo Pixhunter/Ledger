@@ -25,22 +25,22 @@ class PayoutCalculationJob(
 ) {
     private val log = LoggerFactory.getLogger(PayoutCalculationJob::class.java)
 
-    suspend fun run(payoutDate: LocalDate): Int {
-        var computed = 0
+    suspend fun run(payoutDate: LocalDate): List<MerchantBalance> {
+        val computed = mutableListOf<MerchantBalance>()
 
         payouts.balances().forEach { balance ->
             payouts.recordDailyBalance(balance, payoutDate)
 
             when {
                 balance.amount.signum() > 0 ->
-                    if (payouts.computePayout(balance, payoutDate)) computed++
+                    if (payouts.computePayout(balance, payoutDate)) computed += balance
                     else log.info("payout for {} on {} already computed", balance.merchantId, payoutDate)
 
                 balance.amount.signum() < 0 -> reportIfOverdue(balance.merchantId, balance.amount, payoutDate)
             }
         }
 
-        log.info("payout run {}: {} computed", payoutDate, computed)
+        log.info("payout run {}: {} computed", payoutDate, computed.size)
         return computed
     }
 

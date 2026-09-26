@@ -4,7 +4,10 @@ import io.ktor.server.engine.embeddedServer
 import io.ktor.server.netty.Netty
 import org.example.config.AppConfig
 import org.example.db.Database
+import kotlinx.coroutines.runBlocking
 import org.example.db.Migrations
+import org.example.merchant.MerchantSeeder
+import org.example.repository.MerchantRepository
 import org.slf4j.LoggerFactory
 
 private val log = LoggerFactory.getLogger("Main")
@@ -17,6 +20,10 @@ fun main() {
     Migrations.run(dataSource)
 
     val dsl = Database.dslContext(dataSource)
+
+    config.mor.merchantSeedResource
+        ?.takeIf { it.isNotBlank() }
+        ?.let { runBlocking { MerchantSeeder(MerchantRepository(dsl), it).run() } }
 
     embeddedServer(Netty, host = config.server.host, port = config.server.port) {
         ledgerModule(config, dsl)

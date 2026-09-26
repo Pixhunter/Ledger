@@ -5,7 +5,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict 3JpgEJAHcw7pw7Fdq5HSx7dxxc9ZhMszWA1rn3sAiVAFxrtlOJH0b5QYs8ik6Id
+\restrict rFM01gRLZegoctY6weKE7DMuEwpO46xkVyAkWc0QZq3SyQQovz8tSagegaEDRgO
 
 -- Dumped from database version 17.11
 -- Dumped by pg_dump version 17.11
@@ -46,7 +46,7 @@ CREATE TABLE mor.ledger_entry (
     currency text NOT NULL,
     CONSTRAINT ledger_entry_amount_ck CHECK ((amount <> (0)::numeric)),
     CONSTRAINT ledger_entry_currency_ck CHECK ((currency ~ '^[A-Z]{3}$'::text)),
-    CONSTRAINT ledger_entry_purpose_ck CHECK ((purpose = ANY (ARRAY[1, 2, 3, 4, 5])))
+    CONSTRAINT ledger_entry_purpose_ck CHECK ((purpose = ANY (ARRAY[1, 2, 3, 4, 5, 6])))
 );
 
 
@@ -97,11 +97,26 @@ CREATE TABLE mor.merchant (
 
 
 --
+-- Name: merchant_daily_balance; Type: TABLE; Schema: mor; Owner: -
+--
+
+CREATE TABLE mor.merchant_daily_balance (
+    merchant_id uuid NOT NULL,
+    balance_date date NOT NULL,
+    balance numeric(19,4) NOT NULL,
+    currency text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT mdb_currency_ck CHECK ((currency ~ '^[A-Z]{3}$'::text))
+);
+
+
+--
 -- Name: merchant_payment_details; Type: TABLE; Schema: mor; Owner: -
 --
 
 CREATE TABLE mor.merchant_payment_details (
     merchant_id uuid NOT NULL,
+    psp_account_id text NOT NULL,
     account_holder text NOT NULL,
     iban text,
     bic text,
@@ -142,7 +157,7 @@ CREATE TABLE mor.payment (
     CONSTRAINT payment_currency_ck CHECK ((currency ~ '^[A-Z]{3}$'::text)),
     CONSTRAINT payment_hold_ck CHECK (((status <> 2) OR (hold_reason IS NOT NULL))),
     CONSTRAINT payment_split_ck CHECK ((gross = ((tax + fee) + merchant_net))),
-    CONSTRAINT payment_status_ck CHECK ((status = ANY (ARRAY[1, 2, 3, 4, 5])))
+    CONSTRAINT payment_status_ck CHECK ((status = ANY (ARRAY[1, 2, 4, 5])))
 );
 
 
@@ -157,10 +172,28 @@ CREATE TABLE mor.payout (
     currency text NOT NULL,
     ledger_transaction_id uuid NOT NULL,
     status smallint NOT NULL,
+    psp_reference text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT payout_amount_ck CHECK ((amount > (0)::numeric)),
     CONSTRAINT payout_currency_ck CHECK ((currency ~ '^[A-Z]{3}$'::text)),
     CONSTRAINT payout_status_ck CHECK ((status = ANY (ARRAY[1, 2, 3])))
+);
+
+
+--
+-- Name: processing_error; Type: TABLE; Schema: mor; Owner: -
+--
+
+CREATE TABLE mor.processing_error (
+    id uuid NOT NULL,
+    event_type smallint NOT NULL,
+    external_reference text NOT NULL,
+    payload jsonb NOT NULL,
+    error_code smallint NOT NULL,
+    error_detail text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT processing_error_code_ck CHECK ((error_code = ANY (ARRAY[1, 2, 3, 5, 6, 7, 8, 9, 10]))),
+    CONSTRAINT processing_error_event_ck CHECK ((event_type = ANY (ARRAY[1, 2, 3, 4])))
 );
 
 
@@ -185,6 +218,21 @@ CREATE TABLE mor.refund (
 
 
 --
+-- Name: tax_daily_balance; Type: TABLE; Schema: mor; Owner: -
+--
+
+CREATE TABLE mor.tax_daily_balance (
+    country text NOT NULL,
+    balance_date date NOT NULL,
+    balance numeric(19,4) NOT NULL,
+    currency text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT tdb_country_ck CHECK ((country ~ '^[A-Z]{2}$'::text)),
+    CONSTRAINT tdb_currency_ck CHECK ((currency ~ '^[A-Z]{3}$'::text))
+);
+
+
+--
 -- Name: tax_rate; Type: TABLE; Schema: mor; Owner: -
 --
 
@@ -196,6 +244,26 @@ CREATE TABLE mor.tax_rate (
     CONSTRAINT tax_rate_bps_ck CHECK (((rate_bps >= 0) AND (rate_bps <= 10000))),
     CONSTRAINT tax_rate_category_ck CHECK ((category = ANY (ARRAY[1, 2]))),
     CONSTRAINT tax_rate_country_ck CHECK ((country ~ '^[A-Z]{2}$'::text))
+);
+
+
+--
+-- Name: tax_remittance; Type: TABLE; Schema: mor; Owner: -
+--
+
+CREATE TABLE mor.tax_remittance (
+    country text NOT NULL,
+    period_start date NOT NULL,
+    amount numeric(19,4) NOT NULL,
+    currency text NOT NULL,
+    ledger_transaction_id uuid NOT NULL,
+    status smallint NOT NULL,
+    reference text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT tax_remittance_amount_ck CHECK ((amount > (0)::numeric)),
+    CONSTRAINT tax_remittance_country_ck CHECK ((country ~ '^[A-Z]{2}$'::text)),
+    CONSTRAINT tax_remittance_currency_ck CHECK ((currency ~ '^[A-Z]{3}$'::text)),
+    CONSTRAINT tax_remittance_status_ck CHECK ((status = ANY (ARRAY[1, 2, 3])))
 );
 
 
@@ -213,6 +281,14 @@ ALTER TABLE ONLY mor.ledger_entry
 
 ALTER TABLE ONLY mor.ledger_transaction
     ADD CONSTRAINT ledger_transaction_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: merchant_daily_balance merchant_daily_balance_pkey; Type: CONSTRAINT; Schema: mor; Owner: -
+--
+
+ALTER TABLE ONLY mor.merchant_daily_balance
+    ADD CONSTRAINT merchant_daily_balance_pkey PRIMARY KEY (merchant_id, balance_date);
 
 
 --
@@ -248,6 +324,14 @@ ALTER TABLE ONLY mor.payout
 
 
 --
+-- Name: processing_error processing_error_pkey; Type: CONSTRAINT; Schema: mor; Owner: -
+--
+
+ALTER TABLE ONLY mor.processing_error
+    ADD CONSTRAINT processing_error_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: refund refund_pkey; Type: CONSTRAINT; Schema: mor; Owner: -
 --
 
@@ -256,11 +340,27 @@ ALTER TABLE ONLY mor.refund
 
 
 --
+-- Name: tax_daily_balance tax_daily_balance_pkey; Type: CONSTRAINT; Schema: mor; Owner: -
+--
+
+ALTER TABLE ONLY mor.tax_daily_balance
+    ADD CONSTRAINT tax_daily_balance_pkey PRIMARY KEY (country, balance_date);
+
+
+--
 -- Name: tax_rate tax_rate_pkey; Type: CONSTRAINT; Schema: mor; Owner: -
 --
 
 ALTER TABLE ONLY mor.tax_rate
     ADD CONSTRAINT tax_rate_pkey PRIMARY KEY (country, category, valid_from);
+
+
+--
+-- Name: tax_remittance tax_remittance_pkey; Type: CONSTRAINT; Schema: mor; Owner: -
+--
+
+ALTER TABLE ONLY mor.tax_remittance
+    ADD CONSTRAINT tax_remittance_pkey PRIMARY KEY (country, period_start);
 
 
 --
@@ -282,6 +382,13 @@ CREATE INDEX ledger_entry_transaction_idx ON mor.ledger_entry USING btree (trans
 --
 
 CREATE INDEX ledger_transaction_payment_idx ON mor.ledger_transaction USING btree (payment_id);
+
+
+--
+-- Name: merchant_daily_balance_idx; Type: INDEX; Schema: mor; Owner: -
+--
+
+CREATE INDEX merchant_daily_balance_idx ON mor.merchant_daily_balance USING btree (merchant_id, balance_date DESC);
 
 
 --
@@ -313,6 +420,20 @@ CREATE INDEX payout_date_idx ON mor.payout USING btree (payout_date);
 
 
 --
+-- Name: processing_error_created_idx; Type: INDEX; Schema: mor; Owner: -
+--
+
+CREATE INDEX processing_error_created_idx ON mor.processing_error USING btree (created_at);
+
+
+--
+-- Name: processing_error_uk; Type: INDEX; Schema: mor; Owner: -
+--
+
+CREATE UNIQUE INDEX processing_error_uk ON mor.processing_error USING btree (event_type, external_reference, error_code);
+
+
+--
 -- Name: refund_payment_idx; Type: INDEX; Schema: mor; Owner: -
 --
 
@@ -324,6 +445,13 @@ CREATE INDEX refund_payment_idx ON mor.refund USING btree (payment_id);
 --
 
 CREATE UNIQUE INDEX refund_reference_uk ON mor.refund USING btree (refund_reference);
+
+
+--
+-- Name: tax_daily_balance_idx; Type: INDEX; Schema: mor; Owner: -
+--
+
+CREATE INDEX tax_daily_balance_idx ON mor.tax_daily_balance USING btree (country, balance_date DESC);
 
 
 --
@@ -340,6 +468,14 @@ ALTER TABLE ONLY mor.ledger_entry
 
 ALTER TABLE ONLY mor.ledger_transaction
     ADD CONSTRAINT ledger_transaction_payment_id_fkey FOREIGN KEY (payment_id) REFERENCES mor.payment(id);
+
+
+--
+-- Name: merchant_daily_balance merchant_daily_balance_merchant_id_fkey; Type: FK CONSTRAINT; Schema: mor; Owner: -
+--
+
+ALTER TABLE ONLY mor.merchant_daily_balance
+    ADD CONSTRAINT merchant_daily_balance_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES mor.merchant(id);
 
 
 --
@@ -375,7 +511,16 @@ ALTER TABLE ONLY mor.refund
 
 
 --
+-- Name: tax_remittance tax_remittance_ledger_transaction_id_fkey; Type: FK CONSTRAINT; Schema: mor; Owner: -
+--
+
+ALTER TABLE ONLY mor.tax_remittance
+    ADD CONSTRAINT tax_remittance_ledger_transaction_id_fkey FOREIGN KEY (ledger_transaction_id) REFERENCES mor.ledger_transaction(id);
+
+
+--
 -- PostgreSQL database dump complete
 --
 
-\unrestrict 3JpgEJAHcw7pw7Fdq5HSx7dxxc9ZhMszWA1rn3sAiVAFxrtlOJH0b5QYs8ik6Id
+\unrestrict rFM01gRLZegoctY6weKE7DMuEwpO46xkVyAkWc0QZq3SyQQovz8tSagegaEDRgO
+

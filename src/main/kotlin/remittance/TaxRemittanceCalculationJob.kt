@@ -15,17 +15,17 @@ class TaxRemittanceCalculationJob(private val remittances: TaxRemittanceStore) {
 
     private val log = LoggerFactory.getLogger(TaxRemittanceCalculationJob::class.java)
 
-    suspend fun run(periodStart: LocalDate): Int {
-        var computed = 0
+    suspend fun run(periodStart: LocalDate): List<TaxLiability> {
+        val computed = mutableListOf<TaxLiability>()
 
         remittances.liabilities()
             .filter { it.amount.signum() > 0 }
             .forEach { liability ->
-                if (remittances.computeRemittance(liability, periodStart)) computed++
+                if (remittances.computeRemittance(liability, periodStart)) computed += liability
                 else log.info("{} for {} already filed", liability.country, periodStart)
             }
 
-        log.info("tax remittance {}: {} computed", periodStart, computed)
+        log.info("tax remittance {}: {} computed", periodStart, computed.size)
         return computed
     }
 }

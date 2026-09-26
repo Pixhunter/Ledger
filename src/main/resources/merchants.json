@@ -1,0 +1,202 @@
+[
+  {
+    "id": "1a1e7d6c-0000-4000-8000-000000000001",
+    "name": "Best B2B SaaS Startup Inc.",
+    "currency": "EUR",
+    "feeRateBps": 500,
+    "taxCategory": "STANDARD",
+    "status": "ACTIVE",
+    "paymentDetails": {
+      "pspAccountId": "acct_1a1e7d6c",
+      "accountHolder": "B2B SaaS Startup Inc. 1425368",
+      "iban": "DE89370400440532013000",
+      "bic": "COBADEFFXXX",
+      "bankCountry": "DE",
+      "address": {
+        "country": "DE",
+        "city": "Unknown",
+        "line1": "1 Example Street"
+      }
+    }
+  },
+  {
+    "id": "2b2e7d6c-0000-4000-8000-000000000002",
+    "name": "IT Courses",
+    "currency": "EUR",
+    "feeRateBps": 300,
+    "taxCategory": "STANDARD",
+    "status": "ACTIVE",
+    "paymentDetails": {
+      "pspAccountId": "acct_2b2e7d6c",
+      "accountHolder": "Best Scam Courses",
+      "iban": "LT121000011101001000",
+      "bic": "CBVILT2XXXX",
+      "bankCountry": "LT",
+      "address": {
+        "country": "LT",
+        "city": "Unknown",
+        "line1": "1 Example Street"
+      }
+    }
+  },
+  {
+    "id": "3c3e7d6c-0000-4000-8000-000000000003",
+    "name": "Tomcat Media",
+    "currency": "EUR",
+    "feeRateBps": 500,
+    "taxCategory": "STANDARD",
+    "status": "ACTIVE",
+    "paymentDetails": {
+      "pspAccountId": "acct_3c3e7d6c",
+      "accountHolder": "Cartoon Media company",
+      "iban": "ES9121000418450200051332",
+      "bic": "CAIXESBBXXX",
+      "bankCountry": "ES",
+      "address": {
+        "country": "ES",
+        "city": "Unknown",
+        "line1": "1 Example Street"
+      }
+    }
+  },
+  {
+    "id": "4d4e7d6c-0000-4000-8000-000000000004",
+    "name": "Delta Analytics",
+    "currency": "EUR",
+    "feeRateBps": 300,
+    "taxCategory": "STANDARD",
+    "status": "ACTIVE",
+    "paymentDetails": {
+      "pspAccountId": "acct_4d4e7d6c",
+      "accountHolder": "Delta Analytics",
+      "iban": "NL91ABNA0417164300",
+      "bic": "ABNANL2AXXX",
+      "bankCountry": "NL",
+      "address": {
+        "country": "NL",
+        "city": "Unknown",
+        "line1": "1 Example Street"
+      }
+    }
+  },
+  {
+    "id": "5e5e7d6c-0000-4000-8000-000000000005",
+    "name": "Everest Fonts",
+    "currency": "EUR",
+    "feeRateBps": 500,
+    "taxCategory": "STANDARD",
+    "status": "ACTIVE",
+    "paymentDetails": {
+      "pspAccountId": "acct_5e5e7d6c",
+      "accountHolder": "Hot fonts (c)",
+      "iban": "FR1420041010050500013M02606",
+      "bic": "PSSTFRPPXXX",
+      "bankCountry": "FR",
+      "address": {
+        "country": "FR",
+        "city": "Unknown",
+        "line1": "1 Example Street"
+      }
+    }
+  },
+  {
+    "id": "6f6e7d6c-0000-4000-8000-000000000006",
+    "name": "Fjord Hosting",
+    "currency": "EUR",
+    "feeRateBps": 300,
+    "taxCategory": "STANDARD",
+    "status": "ACTIVE",
+    "paymentDetails": {
+      "pspAccountId": "acct_6f6e7d6c",
+      "accountHolder": "Aboba Abobovich",
+      "iban": "FI2112345600000785",
+      "bic": "NDEAFIHHXXX",
+      "bankCountry": "FI",
+      "address": {
+        "country": "FI",
+        "city": "Unknown",
+        "line1": "1 Example Street"
+      }
+    }
+  },
+  {
+    "id": "7a7e7d6c-0000-4000-8000-000000000007",
+    "name": "Granite Learning",
+    "currency": "EUR",
+    "feeRateBps": 500,
+    "taxCategory": "STANDARD",
+    "status": "ACTIVE",
+    "paymentDetails": {
+      "pspAccountId": "acct_7a7e7d6c",
+      "accountHolder": "Granite Learning",
+      "iban": "IE29AIBK93115212345678",
+      "bic": "AIBKIE2DXXX",
+      "bankCountry": "IE",
+      "address": {
+        "country": "IE",
+        "city": "Unknown",
+        "line1": "1 Example Street"
+      }
+    }
+  },
+  {
+    "id": "8b8e7d6c-0000-4000-8000-000000000008",
+    "name": "Helix Design",
+    "currency": "EUR",
+    "feeRateBps": 300,
+    "taxCategory": "STANDARD",
+    "status": "ACTIVE",
+    "paymentDetails": {
+      "pspAccountId": "acct_8b8e7d6c",
+      "accountHolder": "Helix Design",
+      "iban": "IT60X0542811101000000123456",
+      "bic": "BCITITMMXXX",
+      "bankCountry": "IT",
+      "address": {
+        "country": "IT",
+        "city": "Unknown",
+        "line1": "1 Example Street"
+      }
+    }
+  },
+  {
+    "id": "9c9e7d6c-0000-4000-8000-000000000009",
+    "name": "Ionic Games",
+    "currency": "EUR",
+    "feeRateBps": 500,
+    "taxCategory": "STANDARD",
+    "status": "ACTIVE",
+    "paymentDetails": {
+      "pspAccountId": "acct_9c9e7d6c",
+      "accountHolder": "Indie Games",
+      "iban": "PL61109010140000071219812874",
+      "bic": "BREXPLPWXXX",
+      "bankCountry": "PL",
+      "address": {
+        "country": "PL",
+        "city": "Unknown",
+        "line1": "1 Example Street"
+      }
+    }
+  },
+  {
+    "id": "ada07d6c-0000-4000-8000-000000000010",
+    "name": "Juniper Books",
+    "currency": "EUR",
+    "feeRateBps": 300,
+    "taxCategory": "REDUCED",
+    "status": "SUSPENDED",
+    "paymentDetails": {
+      "pspAccountId": "acct_ada07d6c",
+      "accountHolder": "Juniper Books",
+      "iban": "PT50000201231234567890154",
+      "bic": "BCOMPTPLXXX",
+      "bankCountry": "PT",
+      "address": {
+        "country": "PT",
+        "city": "Unknown",
+        "line1": "1 Example Street"
+      }
+    }
+  }
+]

@@ -5,7 +5,12 @@ import java.math.BigDecimal
 import java.time.LocalDate
 import java.util.UUID
 
-data class MerchantBalance(val merchantId: UUID, val amount: BigDecimal)
+data class MerchantBalance(
+    val merchantId: UUID,
+    val merchantName: String,
+    val amount: BigDecimal,
+    val payments: Int,
+)
 
 data class DuePayout(
     val merchantId: UUID,

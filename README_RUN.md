@@ -46,6 +46,22 @@ Re-run only after changing a migration or the API spec.
 ./gradlew run
 ```
 
+## 4. Merchants
+
+10 merchants are inserted from `src/main/resources/merchants.json` at startup:
+new ones are created, changed ones updated, matching ones left alone. Use one
+of their ids as `merchantId`, or the payment is recorded as `HELD`
+(`UNKNOWN_MERCHANT`).
+
+```
+1a1e7d6c-0000-4000-8000-000000000001   Aurora SaaS,  fee 5%
+2b2e7d6c-0000-4000-8000-000000000002   Baltic Courses, fee 3%
+ada07d6c-0000-4000-8000-000000000010   Juniper Books, SUSPENDED
+```
+
+Blank `mor.merchantSeedResource` to switch it off; in production merchants
+come from the onboarding service.
+
 ## 4. Swagger
 
 With the app running:
@@ -62,7 +78,7 @@ web server on :63342.
 
 ```bash
 SECRET=dev-psp-secret-change-me
-BODY='{"pspReference":"psp-1","merchantId":"5f1d9e02-3ab7-4c88-b0e5-6d427fa1c93b","amount":12100,"currency":"EUR","success":true,"billingAddress":{"country":"ES"},"cardIssuingCountry":"ES","paymentTime":"2026-09-22T10:15:30Z"}'
+BODY='{"pspReference":"psp-1","merchantId":"1a1e7d6c-0000-4000-8000-000000000001","amount":12100,"currency":"EUR","success":true,"billingAddress":{"country":"ES"},"cardIssuingCountry":"ES","paymentTime":"2026-09-22T10:15:30Z"}'
 SIG=$(printf %s "$BODY" | openssl dgst -sha256 -hmac "$SECRET" -hex | awk '{print $2}')
 
 curl -X POST localhost:8081/v1/payments \
@@ -75,7 +91,7 @@ curl -X POST localhost:8081/v1/payments \
   -H 'Content-Type: application/json' \
   -d '{
     "pspReference": "psp-1",
-    "merchantId":   "5f1d9e02-3ab7-4c88-b0e5-6d427fa1c93b",
+    "merchantId":   "1a1e7d6c-0000-4000-8000-000000000001",
     "amount":       12100,
     "currency":     "EUR",
     "billingAddress": { "country": "ES" },

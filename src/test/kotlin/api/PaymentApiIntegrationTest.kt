@@ -13,7 +13,7 @@ import org.example.model.enums.HoldReason
 import org.example.model.enums.LedgerTransactionType
 import org.example.model.enums.PaymentPurpose
 import org.example.model.enums.PaymentStatus
-import org.example.service.MerchantRegistry
+import org.example.service.InMemoryMerchantRegistry
 import org.example.support.money
 import java.util.UUID
 import kotlin.test.Test
@@ -25,7 +25,7 @@ class PaymentApiIntegrationTest : LedgerApiIntegrationTestSupport() {
 
     @Test
     fun `valid capture stores payment and balanced ledger entries`() = testApplication {
-        application { ledgerModule(testConfig(), dsl, MerchantRegistry(setOf(merchantId))) }
+        application { ledgerModule(testConfig(), dsl, InMemoryMerchantRegistry(setOf(merchantId))) }
 
         assertEquals(HttpStatusCode.OK, send(PAYMENT_CAPTURE_ENDPOINT, paymentBody()).status)
 
@@ -54,7 +54,7 @@ class PaymentApiIntegrationTest : LedgerApiIntegrationTestSupport() {
 
     @Test
     fun `duplicate capture returns OK and writes payment only once`() = testApplication {
-        application { ledgerModule(testConfig(), dsl, MerchantRegistry(setOf(merchantId))) }
+        application { ledgerModule(testConfig(), dsl, InMemoryMerchantRegistry(setOf(merchantId))) }
 
         val body = paymentBody()
 
@@ -77,7 +77,7 @@ class PaymentApiIntegrationTest : LedgerApiIntegrationTestSupport() {
 
     @Test
     fun `same reference with different data does not overwrite original payment`() = testApplication {
-        application { ledgerModule(testConfig(), dsl, MerchantRegistry(setOf(merchantId))) }
+        application { ledgerModule(testConfig(), dsl, InMemoryMerchantRegistry(setOf(merchantId))) }
 
         assertEquals(HttpStatusCode.OK, send(PAYMENT_CAPTURE_ENDPOINT, paymentBody()).status)
         val databaseAfterFirstCall = databaseSnapshot()
@@ -91,7 +91,7 @@ class PaymentApiIntegrationTest : LedgerApiIntegrationTestSupport() {
 
     @Test
     fun `invalid payment request returns bad request and writes nothing`() = testApplication {
-        application { ledgerModule(testConfig(), dsl, MerchantRegistry(setOf(merchantId))) }
+        application { ledgerModule(testConfig(), dsl, InMemoryMerchantRegistry(setOf(merchantId))) }
 
         val databaseBeforeCall = databaseSnapshot()
 
@@ -102,7 +102,7 @@ class PaymentApiIntegrationTest : LedgerApiIntegrationTestSupport() {
 
     @Test
     fun `payment amount with fractions of a cent is rejected`() = testApplication {
-        application { ledgerModule(testConfig(), dsl, MerchantRegistry(setOf(merchantId))) }
+        application { ledgerModule(testConfig(), dsl, InMemoryMerchantRegistry(setOf(merchantId))) }
 
         assertEquals(
             HttpStatusCode.BadRequest,
@@ -120,7 +120,7 @@ class PaymentApiIntegrationTest : LedgerApiIntegrationTestSupport() {
             ledgerModule(
                 config = testConfig(),
                 dsl = dsl,
-                merchants = MerchantRegistry(setOf(differentKnownMerchant)),
+                merchants = InMemoryMerchantRegistry(setOf(differentKnownMerchant)),
             )
         }
 
@@ -141,7 +141,7 @@ class PaymentApiIntegrationTest : LedgerApiIntegrationTestSupport() {
 
     @Test
     fun `insufficient tax evidence is recorded and held`() = testApplication {
-        application { ledgerModule(testConfig(), dsl, MerchantRegistry(setOf(merchantId))) }
+        application { ledgerModule(testConfig(), dsl, InMemoryMerchantRegistry(setOf(merchantId))) }
 
         val body = paymentBody(billingCountry = null, cardIssuingCountry = "ES", ipCountry = null)
         assertEquals(HttpStatusCode.OK, send(PAYMENT_CAPTURE_ENDPOINT, body).status)
@@ -151,7 +151,7 @@ class PaymentApiIntegrationTest : LedgerApiIntegrationTestSupport() {
 
     @Test
     fun `unsupported tax country is recorded and held`() = testApplication {
-        application { ledgerModule(testConfig(), dsl, MerchantRegistry(setOf(merchantId))) }
+        application { ledgerModule(testConfig(), dsl, InMemoryMerchantRegistry(setOf(merchantId))) }
 
         val body = paymentBody(billingCountry = "JP", cardIssuingCountry = "JP", ipCountry = "JP")
         assertEquals(HttpStatusCode.OK, send(PAYMENT_CAPTURE_ENDPOINT, body).status)
@@ -161,7 +161,7 @@ class PaymentApiIntegrationTest : LedgerApiIntegrationTestSupport() {
 
     @Test
     fun `business buyer in another country is reverse charged`() = testApplication {
-        application { ledgerModule(testConfig(), dsl, MerchantRegistry(setOf(merchantId))) }
+        application { ledgerModule(testConfig(), dsl, InMemoryMerchantRegistry(setOf(merchantId))) }
 
         val body = paymentBody(customerVatId = "ESB12345678")
         assertEquals(HttpStatusCode.OK, send(PAYMENT_CAPTURE_ENDPOINT, body).status)

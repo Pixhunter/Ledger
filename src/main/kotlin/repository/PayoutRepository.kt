@@ -3,8 +3,10 @@ package org.example.repository
 import org.example.db.io
 import org.example.jooq.tables.references.LEDGER_ENTRY
 import org.example.jooq.tables.references.LEDGER_TRANSACTION
+import org.example.jooq.tables.references.MERCHANT
 import org.example.jooq.tables.references.MERCHANT_DAILY_BALANCE
 import org.example.jooq.tables.references.MERCHANT_PAYMENT_DETAILS
+import org.example.jooq.tables.references.PAYMENT
 import org.example.jooq.tables.references.PAYOUT
 import org.example.model.enums.Currency
 import org.example.model.enums.LedgerTransactionType
@@ -15,7 +17,6 @@ import org.example.payout.MerchantBalance
 import org.example.payout.PayoutStore
 import org.jooq.DSLContext
 import org.jooq.impl.DSL
-import java.math.BigDecimal
 import java.time.LocalDate
 import java.util.UUID
 
@@ -26,13 +27,34 @@ class PayoutRepository(private val dsl: DSLContext) : PayoutStore {
     override suspend fun balances(): List<MerchantBalance> = io {
         val owed = DSL.sum(LEDGER_ENTRY.AMOUNT).neg()
 
-        dsl.select(LEDGER_ENTRY.PURPOSE_KEY, owed)
+        val owedByMerchant = dsl.select(LEDGER_ENTRY.PURPOSE_KEY, owed)
             .from(LEDGER_ENTRY)
             .where(LEDGER_ENTRY.PURPOSE.eq(PaymentPurpose.MERCHANT.id))
             .and(LEDGER_ENTRY.PURPOSE_KEY.isNotNull)
             .groupBy(LEDGER_ENTRY.PURPOSE_KEY)
             .fetch()
-            .map { MerchantBalance(UUID.fromString(it.value1()!!), it.value2()!!) }
+            .associate { UUID.fromString(it.value1()!!) to it.value2()!! }
+
+        val payments = dsl.select(PAYMENT.MERCHANT_ID, DSL.count())
+            .from(PAYMENT)
+            .where(PAYMENT.MERCHANT_ID.isNotNull)
+            .groupBy(PAYMENT.MERCHANT_ID)
+            .fetch()
+            .associate { it.value1()!! to it.value2() }
+
+        val names = dsl.select(MERCHANT.ID, MERCHANT.NAME)
+            .from(MERCHANT)
+            .fetch()
+            .associate { it.value1()!! to it.value2()!! }
+
+        owedByMerchant.map { (merchantId, amount) ->
+            MerchantBalance(
+                merchantId = merchantId,
+                merchantName = names[merchantId] ?: "unknown merchant",
+                amount = amount,
+                payments = payments[merchantId] ?: 0,
+            )
+        }
     }
 
     override suspend fun recordDailyBalance(balance: MerchantBalance, balanceDate: LocalDate): Unit = io {

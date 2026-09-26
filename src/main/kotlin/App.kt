@@ -24,6 +24,7 @@ import org.example.remittance.TaxBalanceMonitorJob
 import org.example.remittance.TaxRemittanceCalculationJob
 import org.example.remittance.TaxRemittanceDisbursementJob
 import org.example.repository.TaxRemittanceRepository
+import org.example.repository.MerchantRepository
 import org.example.repository.PaymentRepository
 import org.example.repository.PayoutRepository
 import org.example.repository.ProcessingErrorRepository
@@ -41,9 +42,12 @@ private val log = LoggerFactory.getLogger("App")
 fun Application.ledgerModule(
     config: AppConfig,
     dsl: DSLContext,
-    merchants: MerchantRegistry = MerchantRegistry(),
+    merchants: MerchantRegistry = MerchantRepository(dsl),
 ) {
-    val signature = PspSignature(config.psp.secret)
+    val signature = PspSignature(config.psp.secret, config.psp.allowSecretHeader)
+    if (config.psp.allowSecretHeader) {
+        log.warn("psp.allowSecretHeader is ON - the shared secret is accepted in place of a signature")
+    }
     if (!signature.enabled) {
         log.error("no psp.secret: every request will be rejected")
     }

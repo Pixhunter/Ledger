@@ -114,7 +114,7 @@ class PaymentServiceTest {
         PaymentService(
             payments = store,
             rates = TaxRates(),
-            merchants = MerchantRegistry(known),
+            merchants = InMemoryMerchantRegistry(known),
             feeRate = BasisPoints(300),
             morCountry = "NL",
         ).createPayment(request)

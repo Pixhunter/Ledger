@@ -16,12 +16,20 @@ import javax.crypto.spec.SecretKeySpec
  *
  * Fails closed: no secret means every request is rejected.
  */
-class PspSignature(private val secret: String?) {
+class PspSignature(
+    private val secret: String?,
+    private val allowSecretHeader: Boolean = false,
+) {
 
     val enabled: Boolean get() = !secret.isNullOrBlank()
 
     fun verify(rawBody: ByteArray, header: String?): Boolean {
         if (!enabled || header.isNullOrBlank()) return false
+
+        // Swagger cannot compute an HMAC over the body it is about to send, so
+        // in dev the header may be the shared secret itself. A missing or wrong
+        // header is still rejected, which is the half worth demonstrating.
+        if (allowSecretHeader && constantTimeEquals(secret!!, header.trim())) return true
 
         val mac = Mac.getInstance(ALGORITHM).apply {
             init(SecretKeySpec(secret!!.toByteArray(), ALGORITHM))

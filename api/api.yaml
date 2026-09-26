@@ -28,9 +28,10 @@ paths:
               $ref: './definitions.yaml#/components/schemas/PaymentRequest'
             example:
               pspReference: '8835116497253962'
-              merchantId: 5f1d9e02-3ab7-4c88-b0e5-6d427fa1c93b
+              merchantId: 1a1e7d6c-0000-4000-8000-000000000001
               amount: 119.00
               currency: EUR
+              success: true
               billingAddress:
                 country: DE
                 postalCode: '10115'
@@ -96,3 +97,15 @@ paths:
               example:
                 status: FAILED
                 reason: INVALID_REQUEST
+
+components:
+  securitySchemes:
+    PspSignature:
+      description: |
+        Hex HMAC-SHA256 of the raw request body, using the PSP shared secret.
+      type: apiKey
+      in: header
+      name: X-Psp-Signature
+
+security:
+  - PspSignature: []

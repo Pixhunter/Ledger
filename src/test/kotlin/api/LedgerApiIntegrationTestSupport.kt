@@ -127,6 +127,8 @@ abstract class LedgerApiIntegrationTestSupport : PostgresTest() {
 
     protected companion object {
         const val PSP_SECRET = "test-psp-secret"
+        const val PAYMENT_CAPTURE_ENDPOINT = "/v1/payment/capture"
+        const val PAYMENT_REFUND_ENDPOINT = "/v1/payment/refund"
     }
 
     protected data class DatabaseSnapshot(
@@ -136,8 +138,4 @@ abstract class LedgerApiIntegrationTestSupport : PostgresTest() {
         val entries: List<List<Any?>>,
     )
 
-    protected companion object {
-        const val PAYMENT_CAPTURE_ENDPOINT = "/v1/payment/capture"
-        const val PAYMENT_REFUND_ENDPOINT = "/v1/payment/refund"
-    }
 }

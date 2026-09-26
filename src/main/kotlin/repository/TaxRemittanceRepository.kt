@@ -3,6 +3,7 @@ package org.example.repository
 import org.example.db.io
 import org.example.jooq.tables.references.LEDGER_ENTRY
 import org.example.jooq.tables.references.LEDGER_TRANSACTION
+import org.example.jooq.tables.references.PAYMENT
 import org.example.jooq.tables.references.TAX_DAILY_BALANCE
 import org.example.jooq.tables.references.TAX_REMITTANCE
 import org.example.model.enums.Currency
@@ -14,6 +15,7 @@ import org.example.remittance.TaxLiability
 import org.example.remittance.TaxRemittanceStore
 import org.jooq.DSLContext
 import org.jooq.impl.DSL
+import java.math.BigDecimal
 import java.time.LocalDate
 import java.util.UUID
 
@@ -23,13 +25,32 @@ class TaxRemittanceRepository(private val dsl: DSLContext) : TaxRemittanceStore 
     override suspend fun liabilities(): List<TaxLiability> = io {
         val owed = DSL.sum(LEDGER_ENTRY.AMOUNT).neg()
 
-        dsl.select(LEDGER_ENTRY.PURPOSE_KEY, owed)
+        val owedByCountry = dsl.select(LEDGER_ENTRY.PURPOSE_KEY, owed)
             .from(LEDGER_ENTRY)
             .where(LEDGER_ENTRY.PURPOSE.eq(PaymentPurpose.TAX.id))
             .and(LEDGER_ENTRY.PURPOSE_KEY.isNotNull)
             .groupBy(LEDGER_ENTRY.PURPOSE_KEY)
             .fetch()
-            .map { TaxLiability(it.value1()!!, it.value2()!!) }
+            .associate { it.value1()!! to it.value2()!! }
+
+        // The rate is frozen per payment, so a country can hold several. The
+        // highest is the standard rate, which is what a return is filed at.
+        val byCountry = dsl.select(PAYMENT.TAX_COUNTRY, DSL.count(), DSL.max(PAYMENT.TAX_RATE_BPS))
+            .from(PAYMENT)
+            .where(PAYMENT.TAX_COUNTRY.isNotNull)
+            .groupBy(PAYMENT.TAX_COUNTRY)
+            .fetch()
+            .associate { it.value1()!! to (it.value2() to (it.value3() ?: 0)) }
+
+        owedByCountry.map { (country, amount) ->
+            val (payments, rateBps) = byCountry[country] ?: (0 to 0)
+            TaxLiability(
+                country = country,
+                amount = amount,
+                payments = payments,
+                ratePercent = BigDecimal(rateBps).divide(BigDecimal(100)),
+            )
+        }
     }
 
     override suspend fun recordDailyBalance(liability: TaxLiability, balanceDate: LocalDate): Unit = io {

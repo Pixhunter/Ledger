@@ -4,7 +4,12 @@ import org.example.model.enums.PayoutStatus
 import java.math.BigDecimal
 import java.time.LocalDate
 
-data class TaxLiability(val country: String, val amount: BigDecimal)
+data class TaxLiability(
+    val country: String,
+    val amount: BigDecimal,
+    val payments: Int,
+    val ratePercent: BigDecimal,
+)
 
 data class DueRemittance(
     val country: String,
