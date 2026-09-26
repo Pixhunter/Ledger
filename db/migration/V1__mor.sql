@@ -213,3 +213,55 @@ CREATE TABLE mor.merchant_daily_balance
 
 CREATE INDEX merchant_daily_balance_idx
     ON mor.merchant_daily_balance (merchant_id, balance_date DESC);
+
+
+-- ---------------------------------------------------------------------------
+-- tax_remittance: what was filed and paid to one country's tax authority for
+-- one filing period.
+--
+-- Per country per period, not per payment: a tax authority is paid once a
+-- month against a return, and refunds inside the period simply reduce the
+-- balance before it is remitted.
+-- ---------------------------------------------------------------------------
+CREATE TABLE mor.tax_remittance
+(
+    country               text          NOT NULL,      -- ISO 3166-1 alpha-2
+    period_start          date          NOT NULL,      -- first day of the filing month
+    amount                numeric(19,4) NOT NULL,
+    currency              text          NOT NULL,
+    ledger_transaction_id uuid          NOT NULL REFERENCES mor.ledger_transaction (id),
+    status                smallint      NOT NULL,      -- PayoutStatus: 1 COMPUTED, 2 SENT, 3 CONFIRMED
+    reference             text          NULL,          -- the authority's id for the payment
+    created_at            timestamptz   NOT NULL DEFAULT now(),
+
+    PRIMARY KEY (country, period_start),
+
+    CONSTRAINT tax_remittance_amount_ck   CHECK (amount > 0),
+    CONSTRAINT tax_remittance_status_ck   CHECK (status IN (1, 2, 3)),
+    CONSTRAINT tax_remittance_country_ck  CHECK (country ~ '^[A-Z]{2}$'),
+    CONSTRAINT tax_remittance_currency_ck CHECK (currency ~ '^[A-Z]{3}$')
+);
+
+
+-- ---------------------------------------------------------------------------
+-- tax_daily_balance: what each country's tax account stood at, end of day.
+--
+-- Negative means we remitted more than we owed: a refund arrived after the
+-- period was filed. That is normal for a day or two and settles itself from
+-- the next sales. Staying negative means the refunds are not coming back.
+-- ---------------------------------------------------------------------------
+CREATE TABLE mor.tax_daily_balance
+(
+    country      text          NOT NULL,
+    balance_date date          NOT NULL,
+    balance      numeric(19,4) NOT NULL,             -- signed, what we still owe
+    currency     text          NOT NULL,
+    created_at   timestamptz   NOT NULL DEFAULT now(),
+
+    PRIMARY KEY (country, balance_date),
+
+    CONSTRAINT tdb_country_ck  CHECK (country ~ '^[A-Z]{2}$'),
+    CONSTRAINT tdb_currency_ck CHECK (currency ~ '^[A-Z]{3}$')
+);
+
+CREATE INDEX tax_daily_balance_idx ON mor.tax_daily_balance (country, balance_date DESC);

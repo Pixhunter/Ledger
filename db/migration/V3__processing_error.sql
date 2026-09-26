@@ -13,15 +13,15 @@
 CREATE TABLE mor.processing_error
 (
     id                 uuid        PRIMARY KEY,
-    event_type         smallint    NOT NULL,              -- EventType: 1 CAPTURE, 2 REFUND, 3 PAYOUT
+    event_type         smallint    NOT NULL,              -- EventType: 1 CAPTURE, 2 REFUND, 3 PAYOUT, 4 TAX_REMITTANCE
     external_reference text        NOT NULL,              -- pspReference or refundReference
     payload            jsonb       NOT NULL,              -- raw request, exactly as received
     error_code         smallint    NOT NULL,              -- ProcessingErrorCode
     error_detail       text        NOT NULL,
     created_at         timestamptz NOT NULL DEFAULT now(),
 
-    CONSTRAINT processing_error_event_ck CHECK (event_type IN (1, 2, 3)),
-    CONSTRAINT processing_error_code_ck  CHECK (error_code IN (1, 2, 3, 5, 6, 7, 8, 9))
+    CONSTRAINT processing_error_event_ck CHECK (event_type IN (1, 2, 3, 4)),
+    CONSTRAINT processing_error_code_ck  CHECK (error_code IN (1, 2, 3, 5, 6, 7, 8, 9, 10))
 );
 
 -- A PSP retry of the same broken event must not add a second row.

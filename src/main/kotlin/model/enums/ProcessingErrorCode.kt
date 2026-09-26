@@ -11,4 +11,5 @@ enum class ProcessingErrorCode(override val id: Short) : EnumId {
     UNKNOWN_MERCHANT(7),
     TAX_UNRESOLVED(8),
     NEGATIVE_BALANCE(9),
+    NEGATIVE_TAX_BALANCE(10),
 }

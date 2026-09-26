@@ -12,6 +12,8 @@ import io.ktor.server.routing.routing
 import org.example.config.ServerConfig
 import org.example.payout.PayoutCalculationJob
 import org.example.payout.PayoutDisbursementJob
+import org.example.remittance.TaxRemittanceCalculationJob
+import org.example.remittance.TaxRemittanceDisbursementJob
 import java.io.File
 import java.time.LocalDate
 
@@ -19,6 +21,8 @@ fun Application.devRoutes(
     server: ServerConfig,
     payoutCalculation: PayoutCalculationJob,
     payoutDisbursement: PayoutDisbursementJob,
+    taxCalculation: TaxRemittanceCalculationJob,
+    taxDisbursement: TaxRemittanceDisbursementJob,
 ) {
     routing {
 
@@ -33,6 +37,18 @@ fun Application.devRoutes(
 
         post("/v1/payouts/send") {
             call.respond(HttpStatusCode.OK, mapOf("sent" to payoutDisbursement.run()))
+        }
+
+        post("/v1/tax-remittances/compute") {
+            val period = call.request.queryParameters["period"]
+                ?.let { LocalDate.parse(it) }
+                ?: LocalDate.now().minusMonths(1).withDayOfMonth(1)
+
+            call.respond(HttpStatusCode.OK, mapOf("computed" to taxCalculation.run(period)))
+        }
+
+        post("/v1/tax-remittances/send") {
+            call.respond(HttpStatusCode.OK, mapOf("sent" to taxDisbursement.run()))
         }
 
         get("/health") {

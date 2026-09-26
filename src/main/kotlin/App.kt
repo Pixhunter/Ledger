@@ -19,6 +19,11 @@ import org.example.payout.PayoutCalculationJob
 import org.example.payout.PayoutDisbursementJob
 import org.example.payout.PayoutScheduler
 import org.example.psp.AcceptingPspPayoutClient
+import org.example.remittance.AcceptingTaxAuthorityClient
+import org.example.remittance.TaxBalanceMonitorJob
+import org.example.remittance.TaxRemittanceCalculationJob
+import org.example.remittance.TaxRemittanceDisbursementJob
+import org.example.repository.TaxRemittanceRepository
 import org.example.repository.PaymentRepository
 import org.example.repository.PayoutRepository
 import org.example.repository.ProcessingErrorRepository
@@ -69,8 +74,17 @@ fun Application.ledgerModule(
     val payoutCalculation = PayoutCalculationJob(payoutStore, processingErrors)
     val payoutDisbursement = PayoutDisbursementJob(payoutStore, AcceptingPspPayoutClient())
 
-    PayoutScheduler(payoutCalculation, payoutDisbursement).start(this)
+    val remittanceStore = TaxRemittanceRepository(dsl)
+    val taxCalculation = TaxRemittanceCalculationJob(remittanceStore)
+    val taxDisbursement = TaxRemittanceDisbursementJob(remittanceStore, AcceptingTaxAuthorityClient())
+
+    val taxMonitor = TaxBalanceMonitorJob(remittanceStore, processingErrors)
+
+    PayoutScheduler(
+        payoutCalculation, payoutDisbursement,
+        taxCalculation, taxDisbursement, taxMonitor,
+    ).start(this)
 
     apiRoutes(LedgerController(payments, refunds, processingErrors, signature))
-    devRoutes(config.server, payoutCalculation, payoutDisbursement)
+    devRoutes(config.server, payoutCalculation, payoutDisbursement, taxCalculation, taxDisbursement)
 }
