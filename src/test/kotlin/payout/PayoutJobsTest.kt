@@ -133,7 +133,7 @@ class PayoutJobsTest {
             return true
         }
 
-        override suspend fun due(status: PayoutStatus) = due
+        override suspend fun due(status: PayoutStatus, limit: Int) = due.take(limit)
 
         override suspend fun markSent(merchantId: UUID, payoutDate: LocalDate, pspReference: String) {
             sent += merchantId to payoutDate

@@ -53,6 +53,9 @@ data class AppConfig(
                 user = env("DB_USER") ?: database.user,
                 password = env("DB_PASSWORD") ?: database.password,
                 poolSize = env("DB_POOL_SIZE")?.toInt() ?: database.poolSize,
+                connectionTimeoutMs = env("DB_CONNECTION_TIMEOUT_MS")?.toLong() ?: database.connectionTimeoutMs,
+                statementTimeoutMs = env("DB_STATEMENT_TIMEOUT_MS")?.toLong() ?: database.statementTimeoutMs,
+                lockTimeoutMs = env("DB_LOCK_TIMEOUT_MS")?.toLong() ?: database.lockTimeoutMs,
             ),
         )
 
@@ -77,6 +80,9 @@ data class DatabaseConfig(
     val user: String = "ledger",
     val password: String = "ledger",
     val poolSize: Int = 10,
+    val connectionTimeoutMs: Long = 5_000,
+    val statementTimeoutMs: Long = 30_000,
+    val lockTimeoutMs: Long = 5_000,
 )
 
 @JsonIgnoreProperties(ignoreUnknown = true)

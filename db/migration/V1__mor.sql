@@ -174,7 +174,6 @@ CREATE TABLE mor.ledger_entry
 CREATE INDEX ledger_entry_purpose_idx ON mor.ledger_entry (purpose, purpose_key, currency);
 CREATE INDEX ledger_entry_transaction_idx ON mor.ledger_entry (transaction_id);
 
-
 -- ---------------------------------------------------------------------------
 -- payout: one per merchant per business day.
 --
@@ -191,16 +190,18 @@ CREATE TABLE mor.payout
     ledger_transaction_id uuid        NOT NULL REFERENCES mor.ledger_transaction (id),
     status                smallint    NOT NULL,      -- PayoutStatus: 1 COMPUTED, 2 SENT, 3 CONFIRMED
     psp_reference         text        NULL,          -- the PSP's id for the transfer, set when sent
+    claimed_at            timestamptz NULL,
     created_at            timestamptz NOT NULL DEFAULT now(),
 
     PRIMARY KEY (merchant_id, payout_date),
 
     CONSTRAINT payout_amount_ck   CHECK (amount > 0),
-    CONSTRAINT payout_status_ck   CHECK (status IN (1, 2, 3)),
+    CONSTRAINT payout_status_ck   CHECK (status IN (1, 2, 3, 4)),
     CONSTRAINT payout_currency_ck CHECK (currency ~ '^[A-Z]{3}$')
 );
 
 CREATE INDEX payout_date_idx ON mor.payout (payout_date);
+CREATE INDEX payout_due_idx ON mor.payout (status, payout_date);
 
 
 -- ---------------------------------------------------------------------------
@@ -246,15 +247,18 @@ CREATE TABLE mor.tax_remittance
     ledger_transaction_id uuid          NOT NULL REFERENCES mor.ledger_transaction (id),
     status                smallint      NOT NULL,      -- PayoutStatus: 1 COMPUTED, 2 SENT, 3 CONFIRMED
     reference             text          NULL,          -- the authority's id for the payment
+    claimed_at            timestamptz   NULL,
     created_at            timestamptz   NOT NULL DEFAULT now(),
 
     PRIMARY KEY (country, period_start),
 
     CONSTRAINT tax_remittance_amount_ck   CHECK (amount > 0),
-    CONSTRAINT tax_remittance_status_ck   CHECK (status IN (1, 2, 3)),
+    CONSTRAINT tax_remittance_status_ck   CHECK (status IN (1, 2, 3, 4)),
     CONSTRAINT tax_remittance_country_ck  CHECK (country ~ '^[A-Z]{2}$'),
     CONSTRAINT tax_remittance_currency_ck CHECK (currency ~ '^[A-Z]{3}$')
 );
+
+CREATE INDEX tax_remittance_due_idx ON mor.tax_remittance (status, period_start);
 
 
 -- ---------------------------------------------------------------------------

@@ -23,44 +23,51 @@ class TaxRemittanceRepository(private val dsl: DSLContext) : TaxRemittanceStore 
 
     // Entries are signed: tax owed is a credit, so the liability is the negated sum.
     override suspend fun liabilities(): List<TaxLiability> = io {
-        val owed = DSL.sum(LEDGER_ENTRY.AMOUNT).neg()
-
-        val owedByCountry = dsl.select(LEDGER_ENTRY.PURPOSE_KEY, owed)
-            .from(LEDGER_ENTRY)
-            .where(LEDGER_ENTRY.PURPOSE.eq(PaymentPurpose.TAX.id))
-            .and(LEDGER_ENTRY.PURPOSE_KEY.isNotNull)
-            .groupBy(LEDGER_ENTRY.PURPOSE_KEY)
-            .fetch()
-            .associate { it.value1()!! to it.value2()!! }
-
-        // The rate is frozen per payment, so a country can hold several. The
-        // highest is the standard rate, which is what a return is filed at.
-        val byCountry = dsl.select(PAYMENT.TAX_COUNTRY, DSL.count(), DSL.max(PAYMENT.TAX_RATE_BPS))
-            .from(PAYMENT)
-            .where(PAYMENT.TAX_COUNTRY.isNotNull)
-            .groupBy(PAYMENT.TAX_COUNTRY)
-            .fetch()
-            .associate { it.value1()!! to (it.value2() to (it.value3() ?: 0)) }
-
-        owedByCountry.map { (country, amount) ->
-            val (payments, rateBps) = byCountry[country] ?: (0 to 0)
+        dsl.resultQuery(
+            """
+            WITH balances AS (
+                SELECT purpose_key, -sum(amount) AS amount
+                FROM mor.ledger_entry
+                WHERE purpose = ? AND currency = ? AND purpose_key IS NOT NULL
+                GROUP BY purpose_key
+            ), payment_stats AS (
+                SELECT tax_country, count(*) AS payment_count, max(tax_rate_bps) AS max_rate_bps
+                FROM mor.payment
+                WHERE tax_country IS NOT NULL
+                GROUP BY tax_country
+            )
+            SELECT b.purpose_key AS country,
+                   b.amount,
+                   COALESCE(s.payment_count, 0) AS payment_count,
+                   COALESCE(s.max_rate_bps, 0) AS max_rate_bps
+            FROM balances b
+            LEFT JOIN payment_stats s ON s.tax_country = b.purpose_key
+            """.trimIndent(), PaymentPurpose.TAX.id, Currency.EUR.name,
+        ).fetch().map { row ->
+            val rateBps = row.get("max_rate_bps", Int::class.java) ?: 0
             TaxLiability(
-                country = country,
-                amount = amount,
-                payments = payments,
+                country = row.get("country", String::class.java)!!,
+                amount = row.get("amount", BigDecimal::class.java)!!,
+                payments = row.get("payment_count", Long::class.java)?.toInt() ?: 0,
                 ratePercent = BigDecimal(rateBps).divide(BigDecimal(100)),
             )
         }
     }
 
-    override suspend fun recordDailyBalance(liability: TaxLiability, balanceDate: LocalDate): Unit = io {
+    override suspend fun recordDailyBalances(liabilities: List<TaxLiability>, balanceDate: LocalDate): Unit = io {
+        if (liabilities.isEmpty()) return@io
+        val rows = liabilities.map { liability ->
+            DSL.row(liability.country, balanceDate, liability.amount, Currency.EUR.name)
+        }
         dsl.transaction { cfg ->
-            DSL.using(cfg)
-                .insertInto(TAX_DAILY_BALANCE)
-                .set(TAX_DAILY_BALANCE.COUNTRY, liability.country)
-                .set(TAX_DAILY_BALANCE.BALANCE_DATE, balanceDate)
-                .set(TAX_DAILY_BALANCE.BALANCE, liability.amount)
-                .set(TAX_DAILY_BALANCE.CURRENCY, Currency.EUR.name)
+            DSL.using(cfg).insertInto(
+                TAX_DAILY_BALANCE,
+                TAX_DAILY_BALANCE.COUNTRY,
+                TAX_DAILY_BALANCE.BALANCE_DATE,
+                TAX_DAILY_BALANCE.BALANCE,
+                TAX_DAILY_BALANCE.CURRENCY,
+            )
+                .valuesOfRows(rows)
                 .onConflict(TAX_DAILY_BALANCE.COUNTRY, TAX_DAILY_BALANCE.BALANCE_DATE)
                 .doNothing()
                 .execute()
@@ -68,14 +75,18 @@ class TaxRemittanceRepository(private val dsl: DSLContext) : TaxRemittanceStore 
     }
 
     override suspend fun consecutiveNegativeDays(country: String, balanceDate: LocalDate): Int = io {
-        dsl.select(TAX_DAILY_BALANCE.BALANCE)
-            .from(TAX_DAILY_BALANCE)
-            .where(TAX_DAILY_BALANCE.COUNTRY.eq(country))
-            .and(TAX_DAILY_BALANCE.BALANCE_DATE.le(balanceDate))
-            .orderBy(TAX_DAILY_BALANCE.BALANCE_DATE.desc())
-            .fetch(TAX_DAILY_BALANCE.BALANCE)
-            .takeWhile { it!!.signum() < 0 }
-            .size
+        dsl.resultQuery(
+            """
+            SELECT count(*)
+            FROM mor.tax_daily_balance b
+            WHERE b.country = ? AND b.balance_date <= ? AND b.balance < 0
+              AND b.balance_date > COALESCE((
+                  SELECT max(x.balance_date)
+                  FROM mor.tax_daily_balance x
+                  WHERE x.country = ? AND x.balance_date <= ? AND x.balance >= 0
+              ), DATE '-infinity')
+            """.trimIndent(), country, balanceDate, country, balanceDate,
+        ).fetchOne(0, Int::class.java) ?: 0
     }
 
     override suspend fun computeRemittance(liability: TaxLiability, periodStart: LocalDate): Boolean = io {
@@ -83,6 +94,8 @@ class TaxRemittanceRepository(private val dsl: DSLContext) : TaxRemittanceStore 
             dsl.transactionResult { cfg ->
                 val db = DSL.using(cfg)
                 val transactionId = UUID.randomUUID()
+                val amount = liability.amount.takeIf { it.signum() > 0 }
+                    ?: return@transactionResult false
 
                 db.insertInto(LEDGER_TRANSACTION)
                     .set(LEDGER_TRANSACTION.ID, transactionId)
@@ -92,7 +105,7 @@ class TaxRemittanceRepository(private val dsl: DSLContext) : TaxRemittanceStore 
                 val claimed = db.insertInto(TAX_REMITTANCE)
                     .set(TAX_REMITTANCE.COUNTRY, liability.country)
                     .set(TAX_REMITTANCE.PERIOD_START, periodStart)
-                    .set(TAX_REMITTANCE.AMOUNT, liability.amount)
+                    .set(TAX_REMITTANCE.AMOUNT, amount)
                     .set(TAX_REMITTANCE.CURRENCY, Currency.EUR.name)
                     .set(TAX_REMITTANCE.LEDGER_TRANSACTION_ID, transactionId)
                     .set(TAX_REMITTANCE.STATUS, PayoutStatus.COMPUTED.id)
@@ -112,11 +125,11 @@ class TaxRemittanceRepository(private val dsl: DSLContext) : TaxRemittanceStore 
                 )
                     .values(
                         transactionId, PaymentPurpose.TAX.id,
-                        liability.country, liability.amount, Currency.EUR.name,
+                        liability.country, amount, Currency.EUR.name,
                     )
                     .values(
                         transactionId, PaymentPurpose.PSP.id,
-                        null, liability.amount.negate(), Currency.EUR.name,
+                        null, amount.negate(), Currency.EUR.name,
                     )
                     .execute()
 
@@ -125,13 +138,33 @@ class TaxRemittanceRepository(private val dsl: DSLContext) : TaxRemittanceStore 
         }.getOrElse { e -> if (e is AlreadyFiled) false else throw e }
     }
 
-    override suspend fun due(status: PayoutStatus): List<DueRemittance> = io {
-        dsl.select(TAX_REMITTANCE.COUNTRY, TAX_REMITTANCE.PERIOD_START, TAX_REMITTANCE.AMOUNT)
-            .from(TAX_REMITTANCE)
-            .where(TAX_REMITTANCE.STATUS.eq(status.id))
-            .orderBy(TAX_REMITTANCE.PERIOD_START)
-            .fetch()
-            .map { DueRemittance(it.value1()!!, it.value2()!!, it.value3()!!) }
+    override suspend fun due(status: PayoutStatus, limit: Int): List<DueRemittance> = io {
+        require(limit in 1..1000)
+        dsl.transactionResult { cfg -> DSL.using(cfg).resultQuery(
+            """
+            WITH candidates AS (
+                SELECT country, period_start
+                FROM mor.tax_remittance
+                WHERE status = ?
+                   OR (status = ? AND claimed_at < now() - interval '5 minutes')
+                ORDER BY period_start, country
+                FOR UPDATE SKIP LOCKED
+                LIMIT ?
+            )
+            UPDATE mor.tax_remittance r
+            SET status = ?, claimed_at = now()
+            FROM candidates c
+            WHERE r.country = c.country AND r.period_start = c.period_start
+            RETURNING r.country, r.period_start, r.amount
+            """.trimIndent(),
+            status.id, PayoutStatus.PROCESSING.id, limit, PayoutStatus.PROCESSING.id,
+        ).fetch().map { row ->
+            DueRemittance(
+                row.get(0, String::class.java)!!,
+                row.get(1, LocalDate::class.java)!!,
+                row.get(2, BigDecimal::class.java)!!,
+            )
+        } }
     }
 
     override suspend fun markSent(country: String, periodStart: LocalDate, reference: String): Unit = io {
@@ -142,6 +175,19 @@ class TaxRemittanceRepository(private val dsl: DSLContext) : TaxRemittanceStore 
                 .set(TAX_REMITTANCE.REFERENCE, reference)
                 .where(TAX_REMITTANCE.COUNTRY.eq(country))
                 .and(TAX_REMITTANCE.PERIOD_START.eq(periodStart))
+                .and(TAX_REMITTANCE.STATUS.eq(PayoutStatus.PROCESSING.id))
+                .execute()
+        }
+    }
+
+    override suspend fun release(country: String, periodStart: LocalDate): Unit = io {
+        dsl.transaction { cfg ->
+            DSL.using(cfg).update(TAX_REMITTANCE)
+                .set(TAX_REMITTANCE.STATUS, PayoutStatus.COMPUTED.id)
+                .setNull(DSL.field(DSL.name("claimed_at"), java.time.OffsetDateTime::class.java))
+                .where(TAX_REMITTANCE.COUNTRY.eq(country))
+                .and(TAX_REMITTANCE.PERIOD_START.eq(periodStart))
+                .and(TAX_REMITTANCE.STATUS.eq(PayoutStatus.PROCESSING.id))
                 .execute()
         }
     }

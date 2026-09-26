@@ -143,7 +143,7 @@ class TaxJobsTest {
             return true
         }
 
-        override suspend fun due(status: PayoutStatus) = due
+        override suspend fun due(status: PayoutStatus, limit: Int) = due.take(limit)
 
         override suspend fun markSent(country: String, periodStart: LocalDate, reference: String) {
             sent += country to periodStart

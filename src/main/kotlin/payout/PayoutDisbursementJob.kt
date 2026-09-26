@@ -42,7 +42,10 @@ class PayoutDisbursementJob(
                 // Stays COMPUTED, so the next run retries it. reference is the
                 // idempotency key, so a retry cannot pay twice.
                 is PayoutResult.Failed ->
-                    log.error("payout {} rejected by the PSP: {}", reference, result.reason)
+                    run {
+                        payouts.release(payout.merchantId, payout.payoutDate)
+                        log.error("payout {} rejected by the PSP: {}", reference, result.reason)
+                    }
             }
         }
 

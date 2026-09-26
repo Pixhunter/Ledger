@@ -27,36 +27,42 @@ class PayoutCalculationJob(
 
     suspend fun run(payoutDate: LocalDate): List<MerchantBalance> {
         val computed = mutableListOf<MerchantBalance>()
+        val processingErrors = mutableListOf<ProcessingError>()
+        val balances = payouts.balances()
 
-        payouts.balances().forEach { balance ->
-            payouts.recordDailyBalance(balance, payoutDate)
+        payouts.recordDailyBalances(balances, payoutDate)
 
+        balances.forEach { balance ->
             when {
                 balance.amount.signum() > 0 ->
                     if (payouts.computePayout(balance, payoutDate)) computed += balance
                     else log.info("payout for {} on {} already computed", balance.merchantId, payoutDate)
 
-                balance.amount.signum() < 0 -> reportIfOverdue(balance.merchantId, balance.amount, payoutDate)
+                balance.amount.signum() < 0 ->
+                    overdueError(balance.merchantId, balance.amount, payoutDate)?.let(processingErrors::add)
             }
         }
+        errors.saveAll(processingErrors)
 
         log.info("payout run {}: {} computed", payoutDate, computed.size)
         return computed
     }
 
-    private suspend fun reportIfOverdue(merchantId: UUID, balance: BigDecimal, payoutDate: LocalDate) {
+    private suspend fun overdueError(
+        merchantId: UUID,
+        balance: BigDecimal,
+        payoutDate: LocalDate,
+    ): ProcessingError? {
         val days = payouts.consecutiveNegativeDays(merchantId, payoutDate)
-        if (days < negativeDaysLimit) return
+        if (days < negativeDaysLimit) return null
 
-        errors.save(
-            ProcessingError(
-                id = UUID.randomUUID(),
-                eventType = EventType.PAYOUT,
-                externalReference = "$merchantId-$payoutDate",
-                payload = """{"merchantId":"$merchantId","balance":"$balance","negativeDays":$days}""",
-                code = ProcessingErrorCode.NEGATIVE_BALANCE,
-                detail = "$days consecutive negative days, balance $balance",
-            )
+        return ProcessingError(
+            id = UUID.randomUUID(),
+            eventType = EventType.PAYOUT,
+            externalReference = "$merchantId-$payoutDate",
+            payload = """{"merchantId":"$merchantId","balance":"$balance","negativeDays":$days}""",
+            code = ProcessingErrorCode.NEGATIVE_BALANCE,
+            detail = "$days consecutive negative days, balance $balance",
         )
     }
 

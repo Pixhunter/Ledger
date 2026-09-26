@@ -24,32 +24,33 @@ class TaxBalanceMonitorJob(
 ) {
     suspend fun run(balanceDate: LocalDate): Int {
         var reported = 0
+        val processingErrors = mutableListOf<ProcessingError>()
 
-        remittances.liabilities().forEach { liability ->
-            remittances.recordDailyBalance(liability, balanceDate)
+        val liabilities = remittances.liabilities()
+        remittances.recordDailyBalances(liabilities, balanceDate)
 
+        liabilities.forEach { liability ->
             if (liability.amount.signum() >= 0) return@forEach
 
             val days = remittances.consecutiveNegativeDays(liability.country, balanceDate)
             if (days < negativeDaysLimit) return@forEach
 
-            report(liability.country, liability.amount, days, balanceDate)
+            processingErrors += error(liability.country, liability.amount, days, balanceDate)
             reported++
         }
+        errors.saveAll(processingErrors)
 
         return reported
     }
 
-    private suspend fun report(country: String, balance: BigDecimal, days: Int, date: LocalDate) =
-        errors.save(
-            ProcessingError(
-                id = UUID.randomUUID(),
-                eventType = EventType.TAX_REMITTANCE,
-                externalReference = "$country-$date",
-                payload = """{"country":"$country","balance":"$balance","negativeDays":$days}""",
-                code = ProcessingErrorCode.NEGATIVE_TAX_BALANCE,
-                detail = "$days consecutive negative days, over-remitted $balance",
-            )
+    private fun error(country: String, balance: BigDecimal, days: Int, date: LocalDate) =
+        ProcessingError(
+            id = UUID.randomUUID(),
+            eventType = EventType.TAX_REMITTANCE,
+            externalReference = "$country-$date",
+            payload = """{"country":"$country","balance":"$balance","negativeDays":$days}""",
+            code = ProcessingErrorCode.NEGATIVE_TAX_BALANCE,
+            detail = "$days consecutive negative days, over-remitted $balance",
         )
 
     private companion object {

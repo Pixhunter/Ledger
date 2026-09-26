@@ -26,6 +26,10 @@ interface PayoutStore {
 
     suspend fun recordDailyBalance(balance: MerchantBalance, balanceDate: LocalDate)
 
+    suspend fun recordDailyBalances(balances: List<MerchantBalance>, balanceDate: LocalDate) {
+        balances.forEach { recordDailyBalance(it, balanceDate) }
+    }
+
     /** How many business days up to and including balanceDate this merchant has been negative. */
     suspend fun consecutiveNegativeDays(merchantId: UUID, balanceDate: LocalDate): Int
 
@@ -35,7 +39,10 @@ interface PayoutStore {
      */
     suspend fun computePayout(balance: MerchantBalance, payoutDate: LocalDate): Boolean
 
-    suspend fun due(status: PayoutStatus): List<DuePayout>
+    /** Atomically claims at most [limit] rows for one worker. */
+    suspend fun due(status: PayoutStatus, limit: Int = 100): List<DuePayout>
 
     suspend fun markSent(merchantId: UUID, payoutDate: LocalDate, pspReference: String)
+
+    suspend fun release(merchantId: UUID, payoutDate: LocalDate) = Unit
 }

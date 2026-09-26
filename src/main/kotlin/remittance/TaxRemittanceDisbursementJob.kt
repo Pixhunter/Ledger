@@ -35,7 +35,10 @@ class TaxRemittanceDisbursementJob(
                 // Stays COMPUTED for the next run. reference is the idempotency
                 // key, so a retry cannot pay the same period twice.
                 is RemittanceResult.Failed ->
-                    log.error("remittance {} rejected: {}", reference, result.reason)
+                    run {
+                        remittances.release(remittance.country, remittance.periodStart)
+                        log.error("remittance {} rejected: {}", reference, result.reason)
+                    }
             }
         }
 

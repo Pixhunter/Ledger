@@ -17,6 +17,11 @@ object Database {
             username = config.user
             password = config.password
             maximumPoolSize = config.poolSize
+            connectionTimeout = config.connectionTimeoutMs
+            validationTimeout = minOf(config.connectionTimeoutMs, 5_000)
+            connectionInitSql = "SET statement_timeout = ${config.statementTimeoutMs}; " +
+                "SET lock_timeout = ${config.lockTimeoutMs}; " +
+                "SET idle_in_transaction_session_timeout = ${config.statementTimeoutMs}"
             isAutoCommit = false
         }
         return HikariDataSource(cfg)

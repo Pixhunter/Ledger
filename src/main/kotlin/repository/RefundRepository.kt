@@ -68,7 +68,7 @@ class RefundRepository(private val dsl: DSLContext) : RefundStore {
     override suspend fun insert(
         refund: RefundEntity,
         rawPayload: String,
-        entries: (previousRefundAmounts: List<BigDecimal>) -> List<LedgerEntry>,
+        entries: (previousRefundTotal: BigDecimal) -> List<LedgerEntry>,
     ): LedgerWrite = io {
         dsl.transactionResult { cfg ->
             val db = DSL.using(cfg)
@@ -123,14 +123,13 @@ class RefundRepository(private val dsl: DSLContext) : RefundStore {
                 return@transactionResult LedgerWrite.Duplicate(paymentStatus(db, refund.paymentId))
             }
 
-            val previousRefundAmounts = db.select(REFUND.AMOUNT)
+            val previousRefundTotal = db.select(DSL.coalesce(DSL.sum(REFUND.AMOUNT), BigDecimal.ZERO))
                 .from(REFUND)
                 .where(REFUND.PAYMENT_ID.eq(refund.paymentId))
                 .and(REFUND.ID.ne(refund.id))
-                .fetch(REFUND.AMOUNT)
-                .filterNotNull()
-            val refundedSoFar = previousRefundAmounts.fold(BigDecimal.ZERO, BigDecimal::add) + refund.amount
-            val ledgerEntries = entries(previousRefundAmounts)
+                .fetchOne(0, BigDecimal::class.java) ?: BigDecimal.ZERO
+            val refundedSoFar = previousRefundTotal + refund.amount
+            val ledgerEntries = entries(previousRefundTotal)
 
             ledgerEntries.groupBy { it.currency }.forEach { (currency, group) ->
                 val sum = group.fold(BigDecimal.ZERO) { total, entry -> total + entry.amount }

@@ -22,7 +22,7 @@ interface TaxRemittanceStore {
     /** Outstanding TAX balance per country. Refunds have already reduced it. */
     suspend fun liabilities(): List<TaxLiability>
 
-    suspend fun recordDailyBalance(liability: TaxLiability, balanceDate: LocalDate)
+    suspend fun recordDailyBalances(liabilities: List<TaxLiability>, balanceDate: LocalDate)
 
     /** How many days up to and including balanceDate this country has been negative. */
     suspend fun consecutiveNegativeDays(country: String, balanceDate: LocalDate): Int
@@ -30,7 +30,10 @@ interface TaxRemittanceStore {
     /** Remittance row plus its ledger transaction. False when the period is already filed. */
     suspend fun computeRemittance(liability: TaxLiability, periodStart: LocalDate): Boolean
 
-    suspend fun due(status: PayoutStatus): List<DueRemittance>
+    /** Atomically claims at most [limit] rows for one worker. */
+    suspend fun due(status: PayoutStatus, limit: Int = 100): List<DueRemittance>
 
     suspend fun markSent(country: String, periodStart: LocalDate, reference: String)
+
+    suspend fun release(country: String, periodStart: LocalDate) = Unit
 }

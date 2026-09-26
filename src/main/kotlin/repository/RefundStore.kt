@@ -12,6 +12,6 @@ interface RefundStore {
     suspend fun insert(
         refund: RefundEntity,
         rawPayload: String,
-        entries: (previousRefundAmounts: List<BigDecimal>) -> List<LedgerEntry>,
+        entries: (previousRefundTotal: BigDecimal) -> List<LedgerEntry>,
     ): LedgerWrite
 }

@@ -84,7 +84,7 @@ class PaymentService(
             if (!known) add(HoldReason.UNKNOWN_MERCHANT)
         }
         val gross = request.amount
-        val tax = if (taxUnresolved) Money.ZERO else TaxCalculator.tax(gross, rate!!, request.currency, reverseCharge)
+        val tax = if (taxUnresolved) Money.ZERO else TaxCalculator.tax(gross, rate, request.currency, reverseCharge)
         val fee = if (taxUnresolved) Money.ZERO else TaxCalculator.fee(gross - tax, feeRate, request.currency)
 
         val payment = PaymentEntity(

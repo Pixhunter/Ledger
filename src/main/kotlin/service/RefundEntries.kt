@@ -14,10 +14,9 @@ object RefundEntries {
     fun of(
         refund: RefundEntity,
         payment: PaymentEntity,
-        previousRefundAmounts: List<BigDecimal> = emptyList(),
+        previousTotal: BigDecimal = BigDecimal.ZERO,
     ): List<LedgerEntry> = buildList {
         val currency = payment.currency
-        val previousTotal = previousRefundAmounts.fold(BigDecimal.ZERO, BigDecimal::add)
         val refundedTotal = previousTotal + refund.amount
 
         // Allocate from cumulative totals rather than rounding every refund in
