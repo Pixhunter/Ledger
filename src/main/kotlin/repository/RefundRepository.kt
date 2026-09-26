@@ -5,11 +5,15 @@ import org.example.db.io
 import org.example.jooq.tables.references.LEDGER_ENTRY
 import org.example.jooq.tables.references.LEDGER_TRANSACTION
 import org.example.jooq.tables.references.PAYMENT
+import org.example.jooq.tables.references.PAYMENT_HOLD
 import org.example.jooq.tables.references.REFUND
 import org.example.model.LedgerEntry
 import org.example.model.PaymentEntity
 import org.example.model.RefundEntity
 import org.example.model.LedgerWrite
+import org.example.model.ProcessingError
+import org.example.model.enums.EventType
+import org.example.model.enums.ProcessingErrorCode
 import org.example.model.enumById
 import org.example.model.enums.Currency
 import org.example.model.enums.HoldReason
@@ -28,39 +32,49 @@ class RefundRepository(private val dsl: DSLContext) : RefundStore {
     private val log = LoggerFactory.getLogger(RefundRepository::class.java)
 
     override suspend fun findPayment(pspReference: String): PaymentEntity? = io {
-        dsl.selectFrom(PAYMENT)
+        val rows = dsl.select()
+            .from(PAYMENT)
+            .leftJoin(PAYMENT_HOLD)
+            .on(PAYMENT_HOLD.PAYMENT_ID.eq(PAYMENT.ID))
+            .and(PAYMENT_HOLD.RESOLVED_AT.isNull)
             .where(PAYMENT.PSP_REFERENCE.eq(pspReference))
-            .fetchOne()
-            ?.let { row ->
-                PaymentEntity(
-                    id = row.id,
-                    pspReference = row.pspReference,
-                    merchantId = row.merchantId,
-                    gross = row.gross,
-                    tax = row.tax,
-                    fee = row.fee,
-                    merchantNet = row.merchantNet,
-                    currency = currency(row.currency, row.pspReference),
-                    taxCountry = row.taxCountry,
-                    taxCategory = row.taxCategory?.let { enumById<TaxCategory>(it) },
-                    taxRateBps = row.taxRateBps,
-                    reverseCharge = row.reverseCharge ?: false,
-                    evidence = Mapper.fromJsonb<Map<String, String?>>(row.evidence) ?: emptyMap(),
-                    status = enumById<PaymentStatus>(row.status),
-                    holdReason = row.holdReason?.let { enumById<HoldReason>(it) },
-                    paymentTime = row.paymentTime.toInstant(),
-                )
-            }
+            .fetch()
+
+        val row = rows.firstOrNull() ?: return@io null
+        val reference = row[PAYMENT.PSP_REFERENCE]!!
+
+        PaymentEntity(
+            id = row[PAYMENT.ID]!!,
+            pspReference = reference,
+            merchantId = row[PAYMENT.MERCHANT_ID],
+            gross = row[PAYMENT.GROSS]!!,
+            tax = row[PAYMENT.TAX]!!,
+            fee = row[PAYMENT.FEE]!!,
+            merchantNet = row[PAYMENT.MERCHANT_NET]!!,
+            currency = currency(row[PAYMENT.CURRENCY]!!, reference),
+            taxCountry = row[PAYMENT.TAX_COUNTRY],
+            taxCategory = row[PAYMENT.TAX_CATEGORY]?.let { enumById<TaxCategory>(it) },
+            taxRateBps = row[PAYMENT.TAX_RATE_BPS],
+            reverseCharge = row[PAYMENT.REVERSE_CHARGE] ?: false,
+            evidence = Mapper.fromJsonb<Map<String, String?>>(row[PAYMENT.EVIDENCE]) ?: emptyMap(),
+            status = enumById<PaymentStatus>(row[PAYMENT.STATUS]!!),
+            holdReasons = rows.mapNotNull { it[PAYMENT_HOLD.REASON] }
+                .map { enumById<HoldReason>(it) }
+                .toSet(),
+            paymentTime = row[PAYMENT.PAYMENT_TIME]!!.toInstant(),
+        )
     }
 
     override suspend fun insert(
         refund: RefundEntity,
+        rawPayload: String,
         entries: (previousRefundAmounts: List<BigDecimal>) -> List<LedgerEntry>,
     ): LedgerWrite = io {
         dsl.transactionResult { cfg ->
             val db = DSL.using(cfg)
 
             val gross = paymentGrossForUpdate(db, refund.paymentId)
+            val transactionId = UUID.randomUUID()
 
             val inserted: UUID? = db
                 .insertInto(REFUND)
@@ -72,6 +86,7 @@ class RefundRepository(private val dsl: DSLContext) : RefundStore {
                 .set(REFUND.REASON, refund.reason.id)
                 .set(REFUND.FEE_RETURNED, refund.feeReturned)
                 .set(REFUND.REFUNDED_AT, refund.refundedAt.atOffset(java.time.ZoneOffset.UTC))
+                .set(REFUND.LEDGER_TRANSACTION_ID, transactionId)
                 .onConflict(REFUND.REFUND_REFERENCE)
                 .doNothing()
                 .returningResult(REFUND.ID)
@@ -82,11 +97,25 @@ class RefundRepository(private val dsl: DSLContext) : RefundStore {
                 val stored = storedRefund(db, refund.refundReference)
 
                 if (stored.paymentId != refund.paymentId ||
-                    stored.amount != refund.amount ||
-                    stored.currency != refund.currency
+                    stored.amount.compareTo(refund.amount) != 0 ||
+                    stored.currency != refund.currency ||
+                    stored.reason != refund.reason ||
+                    stored.feeReturned != refund.feeReturned ||
+                    stored.refundedAt != refund.refundedAt
                 ) {
+                    insertProcessingError(
+                        db,
+                        ProcessingError(
+                            id = UUID.randomUUID(),
+                            eventType = EventType.REFUND,
+                            externalReference = refund.refundReference,
+                            payload = rawPayload,
+                            code = ProcessingErrorCode.IDEMPOTENCY_CONFLICT,
+                            detail = "same refundReference received with different immutable refund data",
+                        ),
+                    )
                     return@transactionResult LedgerWrite.Conflict(
-                        "stored ${stored.amount} ${stored.currency} on payment ${stored.paymentId}"
+                        "same refundReference received with different immutable refund data"
                     )
                 }
 
@@ -107,8 +136,6 @@ class RefundRepository(private val dsl: DSLContext) : RefundStore {
                 val sum = group.fold(BigDecimal.ZERO) { total, entry -> total + entry.amount }
                 require(sum.signum() == 0) { "entries for $currency do not sum to zero: $sum" }
             }
-
-            val transactionId = UUID.randomUUID()
 
             db.insertInto(LEDGER_TRANSACTION)
                 .set(LEDGER_TRANSACTION.ID, transactionId)
@@ -143,6 +170,17 @@ class RefundRepository(private val dsl: DSLContext) : RefundStore {
             log.info("stored refund {} as {}", refund.refundReference, status)
 
             if (refundedSoFar.compareTo(gross) > 0) {
+                insertProcessingError(
+                    db,
+                    ProcessingError(
+                        id = UUID.randomUUID(),
+                        eventType = EventType.REFUND,
+                        externalReference = refund.refundReference,
+                        payload = rawPayload,
+                        code = ProcessingErrorCode.OVER_REFUND,
+                        detail = "refunds total $refundedSoFar against gross $gross, excess booked to SUSPENSE",
+                    ),
+                )
                 LedgerWrite.RecordedOverRefund(status, refundedSoFar, gross)
             } else {
                 LedgerWrite.Inserted(status)

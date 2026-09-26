@@ -4,15 +4,20 @@ import kotlinx.coroutines.runBlocking
 import org.example.jooq.tables.references.LEDGER_ENTRY
 import org.example.jooq.tables.references.LEDGER_TRANSACTION
 import org.example.jooq.tables.references.PAYMENT
+import org.example.jooq.tables.references.PAYMENT_HOLD
+import org.example.jooq.tables.references.PROCESSING_ERROR
 import org.example.model.LedgerEntry
 import org.example.model.PaymentEntity
+import org.example.model.ProcessingError
 import org.example.model.LedgerWrite
 import org.example.model.enumById
 import org.example.model.enums.Currency
+import org.example.model.enums.EventType
 import org.example.model.enums.HoldReason
 import org.example.model.enums.LedgerTransactionType
 import org.example.model.enums.PaymentPurpose
 import org.example.model.enums.PaymentStatus
+import org.example.model.enums.ProcessingErrorCode
 import org.example.model.enums.TaxCategory
 import org.example.support.PostgresTest
 import org.example.support.money
@@ -52,7 +57,7 @@ class PaymentRepositoryTest : PostgresTest() {
         assertEquals(2_100, row.taxRateBps)
         assertEquals(false, row.reverseCharge)
         assertEquals(PaymentStatus.POSTED, enumById<PaymentStatus>(row.status))
-        assertNull(row.holdReason)
+        assertEquals(0, dsl.fetchCount(PAYMENT_HOLD))
         assertEquals(paymentTime, row.paymentTime.toInstant())
 
         val transaction = dsl.selectFrom(LEDGER_TRANSACTION).fetchSingle()
@@ -101,7 +106,7 @@ class PaymentRepositoryTest : PostgresTest() {
         runBlocking { repository.insert(held, entries(held)) }
         val replay = runBlocking { repository.insert(held, entries(held)) }
 
-        assertEquals(LedgerWrite.Duplicate(PaymentStatus.HELD), replay)
+        assertEquals(LedgerWrite.Duplicate(PaymentStatus.POSTED), replay)
     }
 
     @Test
@@ -115,6 +120,28 @@ class PaymentRepositoryTest : PostgresTest() {
 
         assertEquals(0, dsl.fetchCount(PAYMENT))
         assertEquals(0, dsl.fetchCount(LEDGER_ENTRY))
+    }
+
+    @Test
+    fun `processing error failure rolls back the held payment and ledger`() {
+        val payment = held()
+        val error = ProcessingError(
+            id = UUID.randomUUID(),
+            eventType = EventType.CAPTURE,
+            externalReference = payment.pspReference,
+            payload = "not-json",
+            code = ProcessingErrorCode.UNKNOWN_MERCHANT,
+            detail = "unknown merchant",
+        )
+
+        assertFailsWith<Exception> {
+            runBlocking { repository.insert(payment, entries(payment), error.payload, listOf(error)) }
+        }
+
+        assertEquals(0, dsl.fetchCount(PAYMENT))
+        assertEquals(0, dsl.fetchCount(LEDGER_TRANSACTION))
+        assertEquals(0, dsl.fetchCount(LEDGER_ENTRY))
+        assertEquals(0, dsl.fetchCount(PROCESSING_ERROR))
     }
 
     private fun storedEntries(): List<Pair<PaymentPurpose, BigDecimal>> =
@@ -141,18 +168,17 @@ class PaymentRepositoryTest : PostgresTest() {
         reverseCharge = false,
         evidence = mapOf("billing" to "ES", "card" to "ES", "ip" to null),
         status = PaymentStatus.POSTED,
-        holdReason = null,
+        holdReasons = emptySet(),
         paymentTime = paymentTime,
     )
 
     private fun held() = posted().copy(
-        status = PaymentStatus.HELD,
-        holdReason = HoldReason.UNKNOWN_MERCHANT,
+        holdReasons = setOf(HoldReason.UNKNOWN_MERCHANT),
     )
 
     private fun entries(payment: PaymentEntity): List<LedgerEntry> {
         val key = payment.merchantId?.toString()
-        val held = payment.status == PaymentStatus.HELD
+        val held = payment.holdReasons.isNotEmpty()
         return listOf(
             LedgerEntry(PaymentPurpose.PSP, null, payment.gross, payment.currency),
             LedgerEntry(PaymentPurpose.TAX, payment.taxCountry, -payment.tax, payment.currency),

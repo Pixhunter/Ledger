@@ -3,6 +3,8 @@ package org.example.service
 import org.example.model.LedgerWrite
 import org.example.model.PaymentEntity
 import org.example.model.Money
+import org.example.model.ProcessingError
+import org.example.model.enums.EventType
 import org.example.model.enums.HoldReason
 import org.example.model.PaymentModel
 import org.example.model.enums.PaymentStatus
@@ -42,7 +44,7 @@ class PaymentService(
 ) {
     private val log = LoggerFactory.getLogger(PaymentService::class.java)
 
-    suspend fun createPayment(request: PaymentModel): LedgerResult {
+    suspend fun createPayment(request: PaymentModel, rawPayload: String = "{}"): LedgerResult {
         // TODO store failed payments for reconciliation and support history. Needs the
         //      idempotency key to be the per-attempt PSP id: with an intent or order id the
         //      same reference can arrive FAILED then SUCCESS, and a stored FAILED row would
@@ -75,15 +77,15 @@ class PaymentService(
             else -> rates.lookup(taxCountry)
         }
 
-        if (taxCountry == null || rate == null) {
-            return hold(request, evidence, HoldReason.TAX_UNRESOLVED, taxCountry)
-        }
-
-        val gross = request.amount
-        val tax = TaxCalculator.tax(gross, rate, request.currency, reverseCharge)
-        val fee = TaxCalculator.fee(gross - tax, feeRate, request.currency)
-
+        val taxUnresolved = taxCountry == null || rate == null
         val known = merchants.exists(request.merchantId)
+        val holdReasons = buildSet {
+            if (taxUnresolved) add(HoldReason.TAX_UNRESOLVED)
+            if (!known) add(HoldReason.UNKNOWN_MERCHANT)
+        }
+        val gross = request.amount
+        val tax = if (taxUnresolved) Money.ZERO else TaxCalculator.tax(gross, rate!!, request.currency, reverseCharge)
+        val fee = if (taxUnresolved) Money.ZERO else TaxCalculator.fee(gross - tax, feeRate, request.currency)
 
         val payment = PaymentEntity(
             id = UUID.randomUUID(),
@@ -95,48 +97,28 @@ class PaymentService(
             merchantNet = gross - tax - fee,
             currency = request.currency,
             taxCountry = taxCountry,
-            taxCategory = taxCategory,
-            taxRateBps = rate.value,
-            reverseCharge = reverseCharge,
+            taxCategory = if (taxUnresolved) null else taxCategory,
+            taxRateBps = rate?.value,
+            reverseCharge = !taxUnresolved && reverseCharge,
             evidence = evidence,
-            status = if (known) PaymentStatus.POSTED else PaymentStatus.HELD,
-            holdReason = if (known) null else HoldReason.UNKNOWN_MERCHANT,
+            status = PaymentStatus.POSTED,
+            holdReasons = holdReasons,
             paymentTime = request.paymentTime,
         )
+
+        val errors = holdReasons.map { reason ->
+            heldError(
+                request,
+                reason,
+                if (reason == HoldReason.UNKNOWN_MERCHANT) "merchant ${request.merchantId}" else "evidence=$evidence",
+            )
+        }
 
         return write(
             payment,
-            if (known) null else heldError(request, HoldReason.UNKNOWN_MERCHANT, "merchant ${request.merchantId}"),
+            errors,
+            rawPayload,
         )
-    }
-
-    /** Recorded but frozen: money we hold and cannot yet attribute. */
-    private suspend fun hold(
-        request: PaymentModel,
-        evidence: Map<String, String?>,
-        reason: HoldReason,
-        taxCountry: String?,
-    ): LedgerResult {
-        val payment = PaymentEntity(
-            id = UUID.randomUUID(),
-            pspReference = request.pspReference,
-            merchantId = request.merchantId,
-            gross = request.amount,
-            tax = Money.ZERO,
-            fee = Money.ZERO,
-            merchantNet = request.amount,     // nothing is split until resolved
-            currency = request.currency,
-            taxCountry = taxCountry,
-            taxCategory = null,
-            taxRateBps = null,
-            reverseCharge = false,
-            evidence = evidence,
-            status = PaymentStatus.HELD,
-            holdReason = reason,
-            paymentTime = request.paymentTime,
-        )
-
-        return write(payment, heldError(request, reason, "evidence=$evidence"))
     }
 
     private fun heldError(request: PaymentModel, reason: HoldReason, detail: String) = LedgerError(
@@ -148,8 +130,28 @@ class PaymentService(
         detail = detail,
     )
 
-    private suspend fun write(payment: PaymentEntity, error: LedgerError?): LedgerResult =
-        when (val write = payments.insert(payment, PaymentEntries.of(payment))) {
+    private suspend fun write(
+        payment: PaymentEntity,
+        errors: List<LedgerError>,
+        rawPayload: String,
+    ): LedgerResult =
+        when (
+            val write = payments.insert(
+                payment,
+                PaymentEntries.of(payment),
+                rawPayload,
+                errors.map {
+                    ProcessingError(
+                        id = UUID.randomUUID(),
+                        eventType = EventType.CAPTURE,
+                        externalReference = it.reference,
+                        payload = rawPayload,
+                        code = it.code,
+                        detail = it.detail,
+                    )
+                },
+            )
+        ) {
             is LedgerWrite.Duplicate -> LedgerResult.Duplicate(write.paymentStatus)
             is LedgerWrite.Conflict -> LedgerResult.NotBookable(
                 LedgerError(
@@ -158,7 +160,7 @@ class PaymentService(
                     write.detail,
                 )
             )
-            is LedgerWrite.Inserted -> LedgerResult.Recorded(write.paymentStatus, error)
+            is LedgerWrite.Inserted -> LedgerResult.Recorded(write.paymentStatus, errors.firstOrNull())
             is LedgerWrite.RecordedOverRefund -> error("a capture cannot answer $write")
         }
 }

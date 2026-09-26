@@ -31,7 +31,7 @@ data class PaymentEntity(
     /** Country codes only - GDPR data minimisation, no raw IP, no full address. */
     val evidence: Map<String, String?>,
     val status: PaymentStatus,
-    val holdReason: HoldReason?,
+    val holdReasons: Set<HoldReason>,
     /** From the PSP. This is the tax point, and it decides the filing period. */
     val paymentTime: Instant,
 ) {
@@ -42,9 +42,6 @@ data class PaymentEntity(
         }
         require(gross.compareTo(tax + fee + merchantNet) == 0) {
             "split does not reconcile: $gross != $tax + $fee + $merchantNet"
-        }
-        require((status == PaymentStatus.HELD) == (holdReason != null)) {
-            "HELD and holdReason are the same fact"
         }
     }
 }

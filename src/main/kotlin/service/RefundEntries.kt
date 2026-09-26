@@ -50,7 +50,7 @@ object RefundEntries {
         if (!Money.isZero(merchantPart)) {
             add(
                 LedgerEntry(
-                    purpose = if (payment.holdReason != null) PaymentPurpose.HELD else PaymentPurpose.MERCHANT,
+                    purpose = if (payment.holdReasons.isNotEmpty()) PaymentPurpose.HELD else PaymentPurpose.MERCHANT,
                     purposeKey = payment.merchantId?.toString(),
                     amount = merchantPart,
                     currency = currency,

@@ -42,7 +42,7 @@ class LedgerController(
 
         log.info("payment psp={} merchant={}", request.pspReference, request.merchantId)
 
-        return answer(payments.createPayment(request), EventType.CAPTURE, rawBody)
+        return answer(payments.createPayment(request, rawBody), EventType.CAPTURE, rawBody)
     }
 
     suspend fun createRefund(rawBody: String, signatureHeader: String?): ApiResponse<LedgerResponseDto> {
@@ -56,7 +56,7 @@ class LedgerController(
 
         log.info("refund psp={} refund={}", request.pspReference, request.refundReference)
 
-        return answer(refunds.createRefund(request), EventType.REFUND, rawBody)
+        return answer(refunds.createRefund(request, rawBody), EventType.REFUND, rawBody)
     }
 
     private fun <T> parse(rawBody: String, decode: (String) -> T): T? {
@@ -71,10 +71,9 @@ class LedgerController(
         eventType: EventType,
         rawBody: String,
     ): ApiResponse<LedgerResponseDto> = when (result) {
-        is LedgerResult.Recorded -> {
-            result.error?.let { record(it, eventType, rawBody) }
-            ApiResponse(HttpStatusCode.OK, recorded())
-        }
+        // Recorded errors are persisted atomically with their money event by
+        // the repository. Recording them again here would split that guarantee.
+        is LedgerResult.Recorded -> ApiResponse(HttpStatusCode.OK, recorded())
 
         is LedgerResult.Duplicate,
         is LedgerResult.NothingToRecord -> ApiResponse(HttpStatusCode.OK, recorded())

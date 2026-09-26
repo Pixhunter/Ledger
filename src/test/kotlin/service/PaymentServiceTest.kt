@@ -3,6 +3,7 @@ package org.example.service
 import kotlinx.coroutines.runBlocking
 import org.example.model.LedgerEntry
 import org.example.model.PaymentEntity
+import org.example.model.ProcessingError
 import org.example.model.PaymentModel
 import org.example.model.LedgerWrite
 import org.example.model.enums.Currency
@@ -36,7 +37,7 @@ class PaymentServiceTest {
         assertEquals(LedgerResult.Recorded(PaymentStatus.POSTED), result)
         val payment = store.single()
         assertEquals(PaymentStatus.POSTED, payment.status)
-        assertNull(payment.holdReason)
+        assertTrue(payment.holdReasons.isEmpty())
         assertEquals(money("21.00"), payment.tax)
         assertEquals(money("3.00"), payment.fee)
         assertEquals(money("97.00"), payment.merchantNet)
@@ -64,11 +65,11 @@ class PaymentServiceTest {
         val result = run(store, request(country = "JP"))
 
         val recorded = assertIs<LedgerResult.Recorded>(result)
-        assertEquals(PaymentStatus.HELD, recorded.paymentStatus)
+        assertEquals(PaymentStatus.POSTED, recorded.paymentStatus)
         assertEquals(ProcessingErrorCode.TAX_UNRESOLVED, recorded.error?.code)
         val payment = store.single()
-        assertEquals(PaymentStatus.HELD, payment.status)
-        assertEquals(HoldReason.TAX_UNRESOLVED, payment.holdReason)
+        assertEquals(PaymentStatus.POSTED, payment.status)
+        assertEquals(setOf(HoldReason.TAX_UNRESOLVED), payment.holdReasons)
         assertEquals(money("0"), payment.tax)
         assertEquals(money("121.00"), payment.merchantNet)
         assertEquals(money("-121.00"), store.amountFor(PaymentPurpose.HELD))
@@ -81,11 +82,11 @@ class PaymentServiceTest {
         val result = run(store, request(), known = setOf(UUID.randomUUID()))
 
         val recorded = assertIs<LedgerResult.Recorded>(result)
-        assertEquals(PaymentStatus.HELD, recorded.paymentStatus)
+        assertEquals(PaymentStatus.POSTED, recorded.paymentStatus)
         assertEquals(ProcessingErrorCode.UNKNOWN_MERCHANT, recorded.error?.code)
         val payment = store.single()
-        assertEquals(PaymentStatus.HELD, payment.status)
-        assertEquals(HoldReason.UNKNOWN_MERCHANT, payment.holdReason)
+        assertEquals(PaymentStatus.POSTED, payment.status)
+        assertEquals(setOf(HoldReason.UNKNOWN_MERCHANT), payment.holdReasons)
         assertEquals(merchantId, payment.merchantId)
         assertEquals(money("-97.00"), store.amountFor(PaymentPurpose.HELD))
         assertEquals(money("-21.00"), store.amountFor(PaymentPurpose.TAX))
@@ -160,6 +161,8 @@ class PaymentServiceTest {
         override suspend fun insert(
             payment: PaymentEntity,
             entries: List<LedgerEntry>,
+            rawPayload: String,
+            errors: List<ProcessingError>,
         ): LedgerWrite {
             writes += payment to entries
             return outcome ?: LedgerWrite.Inserted(payment.status)

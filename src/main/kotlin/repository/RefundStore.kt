@@ -11,6 +11,7 @@ interface RefundStore {
     suspend fun findPayment(pspReference: String): PaymentEntity?
     suspend fun insert(
         refund: RefundEntity,
+        rawPayload: String,
         entries: (previousRefundAmounts: List<BigDecimal>) -> List<LedgerEntry>,
     ): LedgerWrite
 }

@@ -5,12 +5,17 @@ import org.example.db.io
 import org.example.jooq.tables.references.LEDGER_ENTRY
 import org.example.jooq.tables.references.LEDGER_TRANSACTION
 import org.example.jooq.tables.references.PAYMENT
+import org.example.jooq.tables.references.PAYMENT_HOLD
 import org.example.model.LedgerWrite
 import org.example.model.LedgerEntry
 import org.example.model.enums.LedgerTransactionType
 import org.example.model.PaymentEntity
+import org.example.model.ProcessingError
+import org.example.model.enums.EventType
+import org.example.model.enums.ProcessingErrorCode
 import org.example.model.enumById
 import org.example.model.enums.PaymentStatus
+import org.example.model.enums.TaxCategory
 import org.jooq.DSLContext
 import org.jooq.impl.DSL
 import org.slf4j.LoggerFactory
@@ -25,6 +30,8 @@ class PaymentRepository(private val dsl: DSLContext) : PaymentStore {
     override suspend fun insert(
         payment: PaymentEntity,
         entries: List<LedgerEntry>,
+        rawPayload: String,
+        errors: List<ProcessingError>,
     ): LedgerWrite = io {
         // The invariant, checked before it reaches the database. Per currency,
         // because summing across currencies is meaningless. A table CHECK
@@ -57,7 +64,6 @@ class PaymentRepository(private val dsl: DSLContext) : PaymentStore {
                 .set(PAYMENT.REVERSE_CHARGE, payment.reverseCharge)
                 .set(PAYMENT.EVIDENCE, Mapper.toJsonb(payment.evidence))
                 .set(PAYMENT.STATUS, payment.status.id)
-                .set(PAYMENT.HOLD_REASON, payment.holdReason?.id)
                 .set(PAYMENT.PAYMENT_TIME, payment.paymentTime.atOffset(ZoneOffset.UTC))
                 .onConflict(PAYMENT.PSP_REFERENCE)
                 .doNothing()
@@ -77,13 +83,33 @@ class PaymentRepository(private val dsl: DSLContext) : PaymentStore {
 
                 // A replay is only a replay if it says the same thing. The unique
                 // index proves the reference was seen, not that the money matches.
-                if (existing.merchantId != payment.merchantId ||
-                    existing.gross.compareTo(payment.gross) != 0 ||
-                    existing.currency != payment.currency.name
-                ) {
+                val sameEvent = existing.merchantId == payment.merchantId &&
+                        existing.gross.compareTo(payment.gross) == 0 &&
+                        existing.tax.compareTo(payment.tax) == 0 &&
+                        existing.fee.compareTo(payment.fee) == 0 &&
+                        existing.merchantNet.compareTo(payment.merchantNet) == 0 &&
+                        existing.currency == payment.currency.name &&
+                        existing.taxCountry == payment.taxCountry &&
+                        existing.taxCategory?.let { enumById<TaxCategory>(it) } == payment.taxCategory &&
+                        existing.taxRateBps == payment.taxRateBps &&
+                        (existing.reverseCharge ?: false) == payment.reverseCharge &&
+                        Mapper.fromJsonb<Map<String, String?>>(existing.evidence) == payment.evidence &&
+                        existing.paymentTime.toInstant() == payment.paymentTime
+
+                if (!sameEvent) {
+                    insertProcessingError(
+                        db,
+                        ProcessingError(
+                            id = UUID.randomUUID(),
+                            eventType = EventType.CAPTURE,
+                            externalReference = payment.pspReference,
+                            payload = rawPayload,
+                            code = ProcessingErrorCode.IDEMPOTENCY_CONFLICT,
+                            detail = "same pspReference received with different immutable payment data",
+                        ),
+                    )
                     return@transactionResult LedgerWrite.Conflict(
-                        "stored ${existing.gross} ${existing.currency} for merchant ${existing.merchantId}, " +
-                            "received ${payment.gross} ${payment.currency} for merchant ${payment.merchantId}"
+                        "same pspReference received with different immutable payment data"
                     )
                 }
 
@@ -92,6 +118,18 @@ class PaymentRepository(private val dsl: DSLContext) : PaymentStore {
                 return@transactionResult LedgerWrite.Duplicate(
                     enumById<PaymentStatus>(existing.status)
                 )
+            }
+
+            if (payment.holdReasons.isNotEmpty()) {
+                val holds = db.insertInto(
+                    PAYMENT_HOLD,
+                    PAYMENT_HOLD.PAYMENT_ID,
+                    PAYMENT_HOLD.REASON,
+                )
+                payment.holdReasons.forEach { reason ->
+                    holds.values(payment.id, reason.id)
+                }
+                holds.execute()
             }
 
             // One money event, then its lines. Type and payment id live on the
@@ -129,11 +167,13 @@ class PaymentRepository(private val dsl: DSLContext) : PaymentStore {
 
             insert.execute()
 
+            insertProcessingErrors(db, errors)
+
             log.info(
                 "stored {} as {}{}",
                 payment.pspReference,
                 payment.status,
-                payment.holdReason?.let { " ($it)" } ?: "",
+                payment.holdReasons.takeIf { it.isNotEmpty() }?.let { " ($it)" } ?: "",
             )
 
             LedgerWrite.Inserted(payment.status)

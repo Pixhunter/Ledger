@@ -3,6 +3,7 @@ package org.example.repository
 import org.example.model.LedgerEntry
 import org.example.model.PaymentEntity
 import org.example.model.LedgerWrite
+import org.example.model.ProcessingError
 
 /**
  * The port PaymentService writes through.
@@ -13,5 +14,10 @@ import org.example.model.LedgerWrite
  * milliseconds, and the database test is left to prove only persistence.
  */
 interface PaymentStore {
-    suspend fun insert(payment: PaymentEntity, entries: List<LedgerEntry>): LedgerWrite
+    suspend fun insert(
+        payment: PaymentEntity,
+        entries: List<LedgerEntry>,
+        rawPayload: String = "{}",
+        errors: List<ProcessingError> = emptyList(),
+    ): LedgerWrite
 }

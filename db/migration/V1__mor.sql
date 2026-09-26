@@ -96,22 +96,36 @@ CREATE TABLE mor.payment
     tax_rate_bps   int         NULL,                 -- frozen when recorded
     reverse_charge boolean     NOT NULL DEFAULT false,
     evidence       jsonb       NOT NULL,             -- {"billing":"ES","card":"AU","ip":"ES","vatId":null}
-    status         smallint    NOT NULL,             -- PaymentStatus: 1 POSTED, 2 HELD
-    hold_reason    smallint    NULL,                 -- HoldReason: 1 UNKNOWN_MERCHANT, 2 TAX_UNRESOLVED
+    status         smallint    NOT NULL,             -- PaymentStatus: 1 POSTED
     payment_time   timestamptz NOT NULL,             -- from the PSP: the tax point
     created_at     timestamptz NOT NULL DEFAULT now(),
 
     CONSTRAINT payment_split_ck    CHECK (gross = tax + fee + merchant_net),
     CONSTRAINT payment_amounts_ck  CHECK (gross > 0 AND tax >= 0 AND fee >= 0 AND merchant_net >= 0),
-    CONSTRAINT payment_status_ck   CHECK (status IN (1, 2)),
-    CONSTRAINT payment_hold_ck     CHECK ((status = 2) = (hold_reason IS NOT NULL)),
+    CONSTRAINT payment_status_ck   CHECK (status = 1),
     CONSTRAINT payment_currency_ck CHECK (currency ~ '^[A-Z]{3}$'),
     CONSTRAINT payment_country_ck  CHECK (tax_country IS NULL OR tax_country ~ '^[A-Z]{2}$')
 );
 
 CREATE UNIQUE INDEX payment_psp_reference_uk ON mor.payment (psp_reference);
 CREATE INDEX payment_merchant_idx ON mor.payment (merchant_id, payment_time);
-CREATE INDEX payment_held_idx ON mor.payment (status) WHERE status = 2;
+
+-- Hold state is independent from the payment lifecycle. A payment may have
+-- several reasons, resolved separately.
+CREATE TABLE mor.payment_hold
+(
+    payment_id  uuid        NOT NULL REFERENCES mor.payment (id),
+    reason      smallint    NOT NULL,
+    created_at  timestamptz NOT NULL DEFAULT now(),
+    resolved_at timestamptz NULL,
+
+    PRIMARY KEY (payment_id, reason),
+    CONSTRAINT payment_hold_reason_ck CHECK (reason IN (1, 2))
+);
+
+CREATE INDEX payment_hold_active_idx
+    ON mor.payment_hold (payment_id)
+    WHERE resolved_at IS NULL;
 
 
 -- ---------------------------------------------------------------------------

@@ -16,7 +16,7 @@ class RefundService(
 ) {
     private val log = LoggerFactory.getLogger(RefundService::class.java)
 
-    suspend fun createRefund(request: RefundModel): LedgerResult {
+    suspend fun createRefund(request: RefundModel, rawPayload: String = "{}"): LedgerResult {
         if (!request.success) {
             log.info("refund {} failed at the PSP, nothing stored", request.refundReference)
             return LedgerResult.NothingToRecord
@@ -50,7 +50,7 @@ class RefundService(
         )
 
         return when (
-            val write = refunds.insert(refund) { previousRefundAmounts ->
+            val write = refunds.insert(refund, rawPayload) { previousRefundAmounts ->
                 RefundEntries.of(refund, payment, previousRefundAmounts)
             }
         ) {

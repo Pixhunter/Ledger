@@ -10,6 +10,7 @@ import io.ktor.server.testing.ApplicationTestBuilder
 import org.example.jooq.tables.references.LEDGER_ENTRY
 import org.example.jooq.tables.references.LEDGER_TRANSACTION
 import org.example.jooq.tables.references.PAYMENT
+import org.example.jooq.tables.references.PAYMENT_HOLD
 import org.example.jooq.tables.references.REFUND
 import org.example.api.security.PspSignature
 import org.example.model.enumById
@@ -43,6 +44,7 @@ abstract class LedgerApiIntegrationTestSupport : PostgresTest() {
         ipCountry: String? = "ES",
         customerVatId: String? = null,
         success: Boolean = true,
+        paymentTime: Instant = this.paymentTime,
     ) = """
         {
           "pspReference": "$pspReference",
@@ -64,6 +66,7 @@ abstract class LedgerApiIntegrationTestSupport : PostgresTest() {
         amount: BigDecimal = money("121.00"),
         success: Boolean = true,
         reason: String? = "CUSTOMER_REQUEST",
+        refundedAt: Instant = refundTime,
     ) = """
         {
           "refundReference": "$refundReference",
@@ -72,7 +75,7 @@ abstract class LedgerApiIntegrationTestSupport : PostgresTest() {
           "currency": "EUR",
           "success": $success,
           ${reason?.let { """"reason": "$it",""" } ?: ""}
-          "refundedAt": "$refundTime"
+          "refundedAt": "$refundedAt"
         }
     """.trimIndent()
 
@@ -100,6 +103,10 @@ abstract class LedgerApiIntegrationTestSupport : PostgresTest() {
     protected fun databaseSnapshot() = DatabaseSnapshot(
         payments = dsl.selectFrom(PAYMENT)
             .orderBy(PAYMENT.ID)
+            .fetch()
+            .map { it.intoArray().toList() },
+        holds = dsl.selectFrom(PAYMENT_HOLD)
+            .orderBy(PAYMENT_HOLD.PAYMENT_ID, PAYMENT_HOLD.REASON)
             .fetch()
             .map { it.intoArray().toList() },
         refunds = dsl.selectFrom(REFUND)
@@ -133,6 +140,7 @@ abstract class LedgerApiIntegrationTestSupport : PostgresTest() {
 
     protected data class DatabaseSnapshot(
         val payments: List<List<Any?>>,
+        val holds: List<List<Any?>>,
         val refunds: List<List<Any?>>,
         val transactions: List<List<Any?>>,
         val entries: List<List<Any?>>,

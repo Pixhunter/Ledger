@@ -1,8 +1,6 @@
 -- Refund flow.
 ALTER TABLE mor.payment DROP CONSTRAINT payment_status_ck;
-ALTER TABLE mor.payment ADD CONSTRAINT payment_status_ck CHECK (status IN (1, 2, 4, 5));
-ALTER TABLE mor.payment DROP CONSTRAINT payment_hold_ck;
-ALTER TABLE mor.payment ADD CONSTRAINT payment_hold_ck CHECK (status <> 2 OR hold_reason IS NOT NULL);
+ALTER TABLE mor.payment ADD CONSTRAINT payment_status_ck CHECK (status IN (1, 4, 5));
 
 
 -- ---------------------------------------------------------------------------
@@ -17,6 +15,8 @@ CREATE TABLE mor.refund
     id               uuid        PRIMARY KEY,
     refund_reference text        NOT NULL,           -- idempotency key, the refund's own PSP id
     payment_id       uuid        NOT NULL REFERENCES mor.payment (id),
+    ledger_transaction_id uuid   NOT NULL REFERENCES mor.ledger_transaction (id)
+        DEFERRABLE INITIALLY DEFERRED,
     amount           numeric(19,4) NOT NULL,
     currency         text        NOT NULL,
     reason           smallint    NOT NULL,           -- RefundReason: 1 DUPLICATE, 2 FRAUD, 3 CUSTOMER_REQUEST, 4 PRODUCT_ISSUE, 5 OTHER
@@ -30,4 +30,5 @@ CREATE TABLE mor.refund
 );
 
 CREATE UNIQUE INDEX refund_reference_uk ON mor.refund (refund_reference);
+CREATE UNIQUE INDEX refund_ledger_transaction_uk ON mor.refund (ledger_transaction_id);
 CREATE INDEX refund_payment_idx ON mor.refund (payment_id);

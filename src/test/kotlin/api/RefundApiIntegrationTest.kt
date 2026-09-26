@@ -7,7 +7,9 @@ import org.example.config.PspConfig
 import org.example.jooq.tables.references.LEDGER_ENTRY
 import org.example.jooq.tables.references.LEDGER_TRANSACTION
 import org.example.jooq.tables.references.PAYMENT
+import org.example.jooq.tables.references.PAYMENT_HOLD
 import org.example.jooq.tables.references.REFUND
+import org.example.jooq.tables.references.PROCESSING_ERROR
 import org.example.ledgerModule
 import org.example.service.InMemoryMerchantRegistry
 import org.example.model.enumById
@@ -18,8 +20,14 @@ import org.example.model.enums.PaymentStatus
 import org.example.model.enums.RefundReason
 import org.example.support.money
 import java.util.UUID
+import java.time.Instant
+import java.time.temporal.ChronoUnit
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 class RefundApiIntegrationTest : LedgerApiIntegrationTestSupport() {
 
@@ -54,6 +62,13 @@ class RefundApiIntegrationTest : LedgerApiIntegrationTestSupport() {
         assertEquals(payment.id, refund.paymentId)
         assertEquals(money("121.00"), refund.amount)
         assertEquals(false, refund.feeReturned)
+        assertEquals(
+            refund.ledgerTransactionId,
+            dsl.selectFrom(LEDGER_TRANSACTION)
+                .where(LEDGER_TRANSACTION.TYPE.eq(LedgerTransactionType.REFUND.id))
+                .fetchSingle()
+                .id,
+        )
 
         assertEquals(1, dsl.fetchCount(PAYMENT))
         assertEquals(1, dsl.fetchCount(REFUND))
@@ -163,6 +178,109 @@ class RefundApiIntegrationTest : LedgerApiIntegrationTestSupport() {
     }
 
     @Test
+    fun `concurrent partial refunds serialize on the payment`() = testApplication {
+        application { ledgerModule(testConfig(), dsl, InMemoryMerchantRegistry(setOf(merchantId))) }
+        assertEquals(HttpStatusCode.OK, send(PAYMENT_CAPTURE_ENDPOINT, paymentBody()).status)
+
+        val statuses = coroutineScope {
+            listOf("concurrent-a", "concurrent-b").map { reference ->
+                async {
+                    send(
+                        PAYMENT_REFUND_ENDPOINT,
+                        refundBody(refundReference = reference, amount = money("60.50")),
+                    ).status
+                }
+            }.awaitAll()
+        }
+
+        assertTrue(statuses.all { it == HttpStatusCode.OK })
+        assertEquals(2, dsl.fetchCount(REFUND))
+        assertEquals(PaymentStatus.REFUNDED, enumById(dsl.selectFrom(PAYMENT).fetchSingle().status))
+        assertEquals(money("0.00"), entries().sumOf { it.second })
+    }
+
+    @Test
+    fun `over-refund is balanced in suspense and reported once`() = testApplication {
+        application { ledgerModule(testConfig(), dsl, InMemoryMerchantRegistry(setOf(merchantId))) }
+        assertEquals(HttpStatusCode.OK, send(PAYMENT_CAPTURE_ENDPOINT, paymentBody()).status)
+        val body = refundBody(amount = money("150.00"))
+
+        assertEquals(HttpStatusCode.OK, send(PAYMENT_REFUND_ENDPOINT, body).status)
+        assertEquals(HttpStatusCode.OK, send(PAYMENT_REFUND_ENDPOINT, body).status)
+
+        assertEquals(1, dsl.fetchCount(REFUND))
+        assertEquals(1, dsl.fetchCount(PROCESSING_ERROR))
+        assertEquals(PaymentStatus.REFUNDED, enumById(dsl.selectFrom(PAYMENT).fetchSingle().status))
+        val ledgerEntries = entries()
+        assertEquals(money("29.00"), ledgerEntries.balance(PaymentPurpose.SUSPENSE))
+        assertEquals(money("0.00"), ledgerEntries.sumOf { it.second })
+    }
+
+    @Test
+    fun `refund dates before payment or far in the future are reported and not booked`() = testApplication {
+        application { ledgerModule(testConfig(), dsl, InMemoryMerchantRegistry(setOf(merchantId))) }
+        val paymentTime = Instant.now().minus(1, ChronoUnit.HOURS).truncatedTo(ChronoUnit.MILLIS)
+        assertEquals(
+            HttpStatusCode.OK,
+            send(PAYMENT_CAPTURE_ENDPOINT, paymentBody(paymentTime = paymentTime)).status,
+        )
+
+        assertEquals(
+            HttpStatusCode.OK,
+            send(
+                PAYMENT_REFUND_ENDPOINT,
+                refundBody(refundReference = "before-payment", refundedAt = paymentTime.minusSeconds(1)),
+            ).status,
+        )
+        assertEquals(
+            HttpStatusCode.OK,
+            send(
+                PAYMENT_REFUND_ENDPOINT,
+                refundBody(
+                    refundReference = "far-future",
+                    refundedAt = Instant.now().plus(61, ChronoUnit.DAYS),
+                ),
+            ).status,
+        )
+
+        assertEquals(0, dsl.fetchCount(REFUND))
+        assertEquals(1, dsl.fetchCount(LEDGER_TRANSACTION))
+        assertEquals(2, dsl.fetchCount(PROCESSING_ERROR))
+    }
+
+    @Test
+    fun `same refund reference with different reason is a conflict`() = testApplication {
+        application { ledgerModule(testConfig(), dsl, InMemoryMerchantRegistry(setOf(merchantId))) }
+        assertEquals(HttpStatusCode.OK, send(PAYMENT_CAPTURE_ENDPOINT, paymentBody()).status)
+
+        assertEquals(HttpStatusCode.OK, send(PAYMENT_REFUND_ENDPOINT, refundBody(reason = "CUSTOMER_REQUEST")).status)
+        assertEquals(HttpStatusCode.OK, send(PAYMENT_REFUND_ENDPOINT, refundBody(reason = "FRAUD")).status)
+
+        assertEquals(RefundReason.CUSTOMER_REQUEST, enumById<RefundReason>(dsl.selectFrom(REFUND).fetchSingle().reason))
+        assertEquals(1, dsl.fetchCount(REFUND))
+        assertEquals(2, dsl.fetchCount(LEDGER_TRANSACTION))
+        assertEquals(1, dsl.fetchCount(PROCESSING_ERROR))
+    }
+
+    @Test
+    fun `same refund reference with different refund time is a conflict`() = testApplication {
+        application { ledgerModule(testConfig(), dsl, InMemoryMerchantRegistry(setOf(merchantId))) }
+        assertEquals(HttpStatusCode.OK, send(PAYMENT_CAPTURE_ENDPOINT, paymentBody()).status)
+        val firstTime = Instant.now().truncatedTo(ChronoUnit.MILLIS)
+
+        assertEquals(HttpStatusCode.OK, send(PAYMENT_REFUND_ENDPOINT, refundBody(refundedAt = firstTime)).status)
+        assertEquals(
+            HttpStatusCode.OK,
+            send(PAYMENT_REFUND_ENDPOINT, refundBody(refundedAt = firstTime.plusSeconds(1))).status,
+        )
+
+        assertEquals(firstTime, dsl.selectFrom(REFUND).fetchSingle().refundedAt.toInstant())
+        assertEquals(1, dsl.fetchCount(REFUND))
+        assertEquals(2, dsl.fetchCount(LEDGER_TRANSACTION))
+        assertEquals(1, dsl.fetchCount(PROCESSING_ERROR))
+    }
+
+    @Test
     fun `partial refund updates status and reverses tax proportionally`() = testApplication {
         application { ledgerModule(testConfig(), dsl, InMemoryMerchantRegistry(setOf(merchantId))) }
 
@@ -260,6 +378,14 @@ class RefundApiIntegrationTest : LedgerApiIntegrationTestSupport() {
         assertEquals(4, dsl.fetchCount(LEDGER_TRANSACTION))
         assertEquals(13, dsl.fetchCount(LEDGER_ENTRY))
         assertEquals(false, dsl.selectFrom(REFUND).fetch().any { it.feeReturned })
+        val refundTransactionIds = dsl.selectFrom(REFUND).fetch().map { it.ledgerTransactionId }.toSet()
+        val storedRefundTransactionIds = dsl.selectFrom(LEDGER_TRANSACTION)
+            .where(LEDGER_TRANSACTION.TYPE.eq(LedgerTransactionType.REFUND.id))
+            .fetch()
+            .map { it.id }
+            .toSet()
+        assertEquals(3, refundTransactionIds.size)
+        assertEquals(storedRefundTransactionIds, refundTransactionIds)
 
         val ledgerEntries = entries()
         assertEquals(money("0.00"), ledgerEntries.balance(PaymentPurpose.PSP))
@@ -388,7 +514,7 @@ class RefundApiIntegrationTest : LedgerApiIntegrationTestSupport() {
     }
 
     @Test
-    fun `refund of held payment reverses the held balance`() = testApplication {
+    fun `multiple refunds of held payment preserve holds and reverse the held balance`() = testApplication {
         application { ledgerModule(testConfig(), dsl, InMemoryMerchantRegistry(setOf(merchantId))) }
 
         val heldPaymentBody = paymentBody(
@@ -399,14 +525,30 @@ class RefundApiIntegrationTest : LedgerApiIntegrationTestSupport() {
         assertEquals(HttpStatusCode.OK, send(PAYMENT_CAPTURE_ENDPOINT, heldPaymentBody).status)
 
         val heldPayment = dsl.selectFrom(PAYMENT).fetchSingle()
-        assertEquals(PaymentStatus.HELD, enumById<PaymentStatus>(heldPayment.status))
-        assertEquals(HoldReason.TAX_UNRESOLVED, enumById<HoldReason>(heldPayment.holdReason!!))
+        assertEquals(PaymentStatus.POSTED, enumById<PaymentStatus>(heldPayment.status))
+        assertEquals(HoldReason.TAX_UNRESOLVED.id, dsl.selectFrom(PAYMENT_HOLD).fetchSingle().reason)
 
-        assertEquals(HttpStatusCode.OK, send(PAYMENT_REFUND_ENDPOINT, refundBody()).status)
+        assertEquals(
+            HttpStatusCode.OK,
+            send(PAYMENT_REFUND_ENDPOINT, refundBody(amount = money("60.50"))).status,
+        )
+        assertEquals(
+            PaymentStatus.PARTIALLY_REFUNDED,
+            enumById<PaymentStatus>(dsl.selectFrom(PAYMENT).fetchSingle().status),
+        )
+        assertEquals(HoldReason.TAX_UNRESOLVED.id, dsl.selectFrom(PAYMENT_HOLD).fetchSingle().reason)
+
+        assertEquals(
+            HttpStatusCode.OK,
+            send(
+                PAYMENT_REFUND_ENDPOINT,
+                refundBody(refundReference = "held-final-${UUID.randomUUID()}", amount = money("60.50")),
+            ).status,
+        )
 
         val refundedPayment = dsl.selectFrom(PAYMENT).fetchSingle()
         assertEquals(PaymentStatus.REFUNDED, enumById<PaymentStatus>(refundedPayment.status))
-        assertEquals(HoldReason.TAX_UNRESOLVED, enumById<HoldReason>(refundedPayment.holdReason!!))
+        assertEquals(HoldReason.TAX_UNRESOLVED.id, dsl.selectFrom(PAYMENT_HOLD).fetchSingle().reason)
 
         val ledgerEntries = entries()
         assertEquals(money("0.00"), ledgerEntries.balance(PaymentPurpose.PSP))
