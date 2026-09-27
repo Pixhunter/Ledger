@@ -4,7 +4,7 @@ import org.example.repository.TransferClient
 import org.example.repository.TransferKind
 import org.example.repository.TransferResult
 import org.example.repository.TransferStore
-import org.slf4j.LoggerFactory
+import org.example.utils.logger
 
 /**
  * Sends what the calculation job computed. Separate from the calculation so a
@@ -19,7 +19,7 @@ class DisbursementJob(
     private val transfers: TransferStore,
     private val client: TransferClient,
 ) {
-    private val log = LoggerFactory.getLogger(DisbursementJob::class.java)
+    private val log = logger<DisbursementJob>()
 
     suspend fun run(): Int {
         var sent = 0
@@ -33,12 +33,12 @@ class DisbursementJob(
 
                 is TransferResult.Failed -> {
                     transfers.release(transfer)
-                    log.error("{} rejected: {}", transfer.reference, result.reason)
+                    log.error("event=transfer outcome=rejected ref={} reason={}", transfer.reference, result.reason)
                 }
             }
         }
 
-        log.info("{} disbursement: {} sent", kind.reference, sent)
+        log.info("event=disbursement kind={} sent={}", kind.reference, sent)
         return sent
     }
 }

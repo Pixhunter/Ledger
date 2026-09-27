@@ -22,7 +22,8 @@ import org.example.service.LedgerError
 import org.example.service.LedgerResult
 import org.example.service.PaymentService
 import org.example.service.RefundService
-import org.slf4j.LoggerFactory
+import org.example.utils.logger
+import org.slf4j.MDC
 
 /**
  * The PSP-facing half of the production API: verify the signature, parse, hand
@@ -37,13 +38,14 @@ class LedgerController(
     private val errors: ProcessingErrorStore,
     private val signature: PspSignature,
 ) {
-    private val log = LoggerFactory.getLogger(LedgerController::class.java)
+    private val log = logger<LedgerController>()
 
     fun routes(route: Route) = with(route) {
         post("/v1/payment/capture") {
             handle(EventType.CAPTURE) { raw ->
                 val request = apiJson.decodeFromString<PaymentRequestDto>(raw).toModel()
-                log.info("payment psp={} merchant={}", request.pspReference, request.merchantId)
+                MDC.put(REFERENCE, request.pspReference)
+                log.debug("merchant={} amount={} {}", request.merchantId, request.amount, request.currency)
                 payments.createPayment(request, raw)
             }
         }
@@ -51,7 +53,8 @@ class LedgerController(
         post("/v1/payment/refund") {
             handle(EventType.REFUND) { raw ->
                 val request = apiJson.decodeFromString<RefundRequestDto>(raw).toModel()
-                log.info("refund psp={} refund={}", request.pspReference, request.refundReference)
+                MDC.put(REFERENCE, request.refundReference)
+                log.debug("payment={} amount={} {}", request.pspReference, request.amount, request.currency)
                 refunds.createRefund(request, raw)
             }
         }
@@ -63,37 +66,78 @@ class LedgerController(
         book: suspend (rawBody: String) -> LedgerResult,
     ) {
         val rawBody = call.receiveText()
+        val startedAt = System.nanoTime()
+        MDC.put(EVENT, eventType.name.lowercase())
 
-        if (!signature.verify(rawBody.toByteArray(), call.request.headers[PspSignature.HEADER])) {
-            log.warn("rejected unsigned {} request", eventType)
-            return call.respond(HttpStatusCode.Unauthorized, rejected(ErrorReasonDto.INVALID_REQUEST))
+        try {
+            if (!signature.verify(rawBody.toByteArray(), call.request.headers[PspSignature.HEADER])) {
+                finish(HttpStatusCode.Unauthorized, "unsigned", startedAt)
+                return call.respond(HttpStatusCode.Unauthorized, rejected(ErrorReasonDto.INVALID_REQUEST))
+            }
+
+            val result = runCatching { book(rawBody) }.getOrElse { e ->
+                finish(HttpStatusCode.BadRequest, "malformed", startedAt, e.message)
+                return call.respond(HttpStatusCode.BadRequest, rejected(ErrorReasonDto.INVALID_REQUEST))
+            }
+
+            answer(result, eventType, rawBody, startedAt)
+        } finally {
+            MDC.remove(EVENT)
+            MDC.remove(REFERENCE)
         }
+    }
 
-        val result = runCatching { book(rawBody) }.getOrElse { e ->
-            log.warn("bad request: {}", e.message)
-            return call.respond(HttpStatusCode.BadRequest, rejected(ErrorReasonDto.INVALID_REQUEST))
+    /** The one line per request that says how it ended. */
+    private fun finish(
+        status: HttpStatusCode,
+        outcome: String,
+        startedAt: Long,
+        detail: String? = null,
+    ) {
+        val tookMs = (System.nanoTime() - startedAt) / 1_000_000
+        val line = "outcome={} status={} took={}ms"
+
+        if (status.value >= 400 && status != HttpStatusCode.NotFound) {
+            log.warn("$line detail={}", outcome, status.value, tookMs, detail ?: "-")
+        } else {
+            log.info(line, outcome, status.value, tookMs)
         }
-
-        answer(result, eventType, rawBody)
     }
 
     private suspend fun RoutingContext.answer(
         result: LedgerResult,
         eventType: EventType,
         rawBody: String,
-    ) = when (result) {
+        startedAt: Long,
+    ) {
         // Recorded errors are persisted atomically with their money event by
         // the repository. Recording them again here would split that guarantee.
-        is LedgerResult.Recorded,
-        is LedgerResult.Duplicate,
-        is LedgerResult.NothingToRecord -> call.respond(HttpStatusCode.OK, recorded())
+        when (result) {
+            is LedgerResult.Recorded -> {
+                finish(HttpStatusCode.OK, "recorded status=${result.paymentStatus}", startedAt)
+                call.respond(HttpStatusCode.OK, recorded())
+            }
 
-        is LedgerResult.PaymentNotFound ->
-            call.respond(HttpStatusCode.NotFound, rejected(ErrorReasonDto.INVALID_REQUEST))
+            is LedgerResult.Duplicate -> {
+                finish(HttpStatusCode.OK, "duplicate status=${result.paymentStatus}", startedAt)
+                call.respond(HttpStatusCode.OK, recorded())
+            }
 
-        is LedgerResult.NotBookable -> {
-            record(result.error, eventType, rawBody)
-            call.respond(HttpStatusCode.OK, recorded())
+            is LedgerResult.NothingToRecord -> {
+                finish(HttpStatusCode.OK, "not_recorded", startedAt)
+                call.respond(HttpStatusCode.OK, recorded())
+            }
+
+            is LedgerResult.PaymentNotFound -> {
+                finish(HttpStatusCode.NotFound, "payment_not_found", startedAt)
+                call.respond(HttpStatusCode.NotFound, rejected(ErrorReasonDto.INVALID_REQUEST))
+            }
+
+            is LedgerResult.NotBookable -> {
+                record(result.error, eventType, rawBody)
+                finish(HttpStatusCode.OK, "quarantined code=${result.error.code}", startedAt)
+                call.respond(HttpStatusCode.OK, recorded())
+            }
         }
     }
 
@@ -109,4 +153,10 @@ class LedgerController(
                 detail = error.detail,
             )
         )
+
+    private companion object {
+        /** MDC keys. Rendered by %X{ref} and %X{event} in logback.xml. */
+        const val REFERENCE = "ref"
+        const val EVENT = "event"
+    }
 }

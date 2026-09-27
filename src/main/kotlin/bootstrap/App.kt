@@ -31,7 +31,6 @@ import org.example.service.RefundService
 import org.example.repository.BasisPoints
 import org.example.service.TaxRates
 import org.jooq.DSLContext
-import org.slf4j.LoggerFactory
 import org.example.api.adapter.AcceptingTransferClient
 import org.example.service.scheduled.DisbursementJob
 import org.example.repository.TransferKind
@@ -39,8 +38,9 @@ import io.ktor.server.routing.routing
 import org.example.api.DtoMapper.rejected
 import org.example.config.AppConfig
 import java.time.DateTimeException
+import org.example.utils.logger
 
-private val log = LoggerFactory.getLogger("App")
+private val log = logger("App")
 
 fun Application.ledgerModule(
     config: AppConfig,

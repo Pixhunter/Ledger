@@ -26,4 +26,7 @@ data class PaymentDetailsSeed(
     val routingCode: String? = null,
     val bankCountry: String,
     val address: Map<String, String>,
-)
+) {
+    /** Account identifiers and an address: personal data, never printable. */
+    override fun toString() = "PaymentDetailsSeed(bankCountry=$bankCountry)"
+}

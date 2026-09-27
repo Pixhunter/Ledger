@@ -4,21 +4,21 @@ import org.example.model.LedgerWrite
 import org.example.model.RefundEntity
 import org.example.model.RefundModel
 import org.example.model.enums.ProcessingErrorCode
-import org.slf4j.LoggerFactory
 import java.time.Clock
 import org.example.utils.Constants
 import org.example.api.randomUuid
 import org.example.repository.RefundRepository
+import org.example.utils.logger
 
 class RefundService(
     private val refunds: RefundRepository,
     private val clock: Clock = Clock.systemUTC(),
 ) {
-    private val log = LoggerFactory.getLogger(RefundService::class.java)
+    private val log = logger<RefundService>()
 
     suspend fun createRefund(request: RefundModel, rawPayload: String = "{}"): LedgerResult {
         if (!request.success) {
-            log.info("refund {} failed at the PSP, nothing stored", request.refundReference)
+            log.info("outcome=psp_failed nothing stored")
             return LedgerResult.NothingToRecord
         }
 

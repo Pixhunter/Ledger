@@ -9,13 +9,18 @@ import org.example.bootstrap.ledgerModule
 import org.example.database.Migrations
 import org.example.bootstrap.MerchantSeeder
 import org.example.repository.MerchantRepository
-import org.slf4j.LoggerFactory
+import org.example.utils.logger
 
-private val log = LoggerFactory.getLogger("Main")
+
+private val log = logger("ledger")
 
 fun main() {
     val config = AppConfig.load()
-    log.info("config loaded: ${config.server.host}:${config.server.port} -> ${config.database.url}")
+    // The JDBC url is not logged: it carries credentials. GDPR Art. 32.
+    log.info(
+        "event=startup host={} port={} db={}",
+        config.server.host, config.server.port, config.database.url.substringAfterLast('/'),
+    )
 
     val dataSource = Database.dataSource(config.database)
     Migrations.run(dataSource)

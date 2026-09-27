@@ -1,10 +1,11 @@
 package org.example.service
 
-import org.slf4j.LoggerFactory
+import org.example.utils.logger
+
 
 object TaxCountryVote {
 
-    private val log = LoggerFactory.getLogger(TaxCountryVote::class.java)
+    private val log = logger<TaxCountryVote>()
 
     sealed interface Result {
         data class Decided(val country: String, val agreeing: Int) : Result
@@ -30,7 +31,11 @@ object TaxCountryVote {
 
         if (best.value >= 2) {
             if (counts.size > 1) {
-                log.warn("tax country conflict, {} wins with {} votes: {}", best.key, best.value, evidence)
+                log.warn(
+                    "event=tax_country outcome=conflict country={} agreeing={}/{}",
+                    best.key, best.value, votes.size,
+                )
+                log.debug("tax country signals: {}", evidence)
             }
             return Result.Decided(best.key, best.value)
         }
@@ -38,7 +43,11 @@ object TaxCountryVote {
         // TODO Replace this permissive fallback with stronger evidence validation when
         // tax-jurisdiction verification enters scope.
         billingCountry?.let {
-            log.warn("no majority, falling back to billing country {}: {}", it, evidence)
+            log.warn(
+                "event=tax_country outcome=weak_evidence country={} agreeing=1/{}",
+                it, votes.size,
+            )
+            log.debug("tax country signals: {}", evidence)
             return Result.Decided(it, 1)
         }
 

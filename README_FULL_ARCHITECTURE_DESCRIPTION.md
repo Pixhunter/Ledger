@@ -25,11 +25,11 @@ Tax is decided in 3 steps.
 
 The PSP and checkout give us up to 3 signals:
 
-| Signal | Source | Can be wrong because |
-|---|---|---|
-| `billingAddress.country` | PSP | customer typed it |
-| `cardIssuingCountry` | PSP (card BIN) | old card, moved abroad |
-| `ipCountry` | checkout, via PSP metadata | VPN, travelling |
+| Signal                   | Source                     | Can be wrong because   |
+|--------------------------|----------------------------|------------------------|
+| `billingAddress.country` | PSP                        | customer typed it      |
+| `cardIssuingCountry`     | PSP (card BIN)             | old card, moved abroad |
+| `ipCountry`              | checkout, via PSP metadata | VPN, travelling        |
 
 Rules:
 
@@ -42,39 +42,39 @@ Rules:
 
 Examples:
 
-| Billing | Card | IP | Tax country | Why |
-|---|---|---|---|---|
-| ES | ES | ES | ES | all agree |
-| ES | AU | ES | ES | 2 of 3 |
-| AU | AU | ES | AU | tourist in Spain, lives in Australia |
-| ES | AU | FR | ES | no majority, billing wins, logged |
+| Billing | Card | IP | Tax country | Why                                  |
+|---------|------|----|-------------|--------------------------------------|
+| ES      | ES   | ES | ES          | all agree                            |
+| ES      | AU   | ES | ES          | 2 of 3                               |
+| AU      | AU   | ES | AU          | tourist in Spain, lives in Australia |
+| ES      | AU   | FR | ES          | no majority, billing wins, logged    |
 
 ### 2. Customer type
 
-| Condition | Treatment | Tax we charge |
-|---|---|---|
-| no `customerVatId` | B2C | standard rate of tax country |
-| `customerVatId` present, cross-border | B2B reverse charge | 0%, buyer self-accounts |
+| Condition                             | Treatment          | Tax we charge                |
+|---------------------------------------|--------------------|------------------------------|
+| no `customerVatId`                    | B2C                | standard rate of tax country |
+| `customerVatId` present, cross-border | B2B reverse charge | 0%, buyer self-accounts      |
 
 ### 3. Country -> rate
 
 Standard rates, kept in config (basis points, 1900 = 19%).
 Verify against official sources before production use.
 
-| Country | Rate |
-|---|---|
-| DE | 19% |
-| FR | 20% |
-| ES | 21% |
-| IT | 22% |
-| NL | 21% |
-| PL | 23% |
-| IE | 23% |
-| SE | 25% |
-| GB | 20% |
-| NO | 25% |
-| AU | 10% (GST) |
-| JP | 10% |
+| Country | Rate      |
+|---------|-----------|
+| DE      | 19%       |
+| FR      | 20%       |
+| ES      | 21%       |
+| IT      | 22%       |
+| NL      | 21%       |
+| PL      | 23%       |
+| IE      | 23%       |
+| SE      | 25%       |
+| GB      | 20%       |
+| NO      | 25%       |
+| AU      | 10% (GST) |
+| JP      | 10%       |
 
 Country not in the table: see open decisions.
 
@@ -196,10 +196,10 @@ sequenceDiagram
 
 ### States
 
-| Object | States (stored as smallint) |
-|---|---|
+| Object  | States (stored as smallint)                                |
+|---------|------------------------------------------------------------|
 | Payment | 1 `POSTED`, 2 `HELD`, 4 `PARTIALLY_REFUNDED`, 5 `REFUNDED` |
-| Payout | 1 `COMPUTED`, 2 `SENT`, 3 `CONFIRMED` |
+| Payout  | 1 `COMPUTED`, 2 `SENT`, 3 `CONFIRMED`                      |
 
 Enums are stored as `smallint`, not text: every enum implements `EnumId`
 (`val id: Short`) and the id is what goes in the column. Smaller rows and
@@ -212,12 +212,12 @@ column comment, and a reporting view should join the labels back.
 HELD = money is **recorded but frozen**. It shows in balances as `held`,
 the payout job skips it, a human reviews it.
 
-| Reason | Trigger | Where the money sits |
-|---|---|---|
-| `UNKNOWN_MERCHANT` | merchant not in our system | ledger account `HELD`, key null |
-| `TAX_UNRESOLVED` | country vote fails / country not in rate table | ledger account `HELD`, key = merchant |
-| `RISK` (future) | fraud signals | merchant held balance |
-| `SANCTIONS` (future) | embargoed country | merchant held balance, compliance |
+| Reason               | Trigger                                        | Where the money sits                  |
+|----------------------|------------------------------------------------|---------------------------------------|
+| `UNKNOWN_MERCHANT`   | merchant not in our system                     | ledger account `HELD`, key null       |
+| `TAX_UNRESOLVED`     | country vote fails / country not in rate table | ledger account `HELD`, key = merchant |
+| `RISK` (future)      | fraud signals                                  | merchant held balance                 |
+| `SANCTIONS` (future) | embargoed country                              | merchant held balance, compliance     |
 
 Review outcome: **release** (moves to available, paid next night) or
 **refund** (new refund transaction to the customer).
@@ -225,11 +225,11 @@ Review outcome: **release** (moves to available, paid next night) or
 ### Validation: where each check belongs
 
 | Before capture (checkout / PSP) - can reject | After capture (ledger) - record or hold |
-|---|---|
-| fraud score, 3-D Secure | signature, schema -> reject 401 / 400 |
-| merchant active, verified | duplicate -> stored answer |
-| sanctions | unknown merchant -> HELD |
-| amount limits | country vote fails -> HELD |
+|----------------------------------------------|-----------------------------------------|
+| fraud score, 3-D Secure                      | signature, schema -> reject 401 / 400   |
+| merchant active, verified                    | duplicate -> stored answer              |
+| sanctions                                    | unknown merchant -> HELD                |
+| amount limits                                | country vote fails -> HELD              |
 
 ## Refund
 
@@ -284,15 +284,15 @@ Example:
 
 Responses:
 
-| Code | When | Body |
-|---|---|---|
-| 200 | refund recorded | `{"status": "PARTIALLY_REFUNDED"}` or `{"status": "REFUNDED"}` (payment status after the refund) |
-| 200 | `success = false` | `{"status": "NOT_PROCESSED"}`, nothing saved |
-| 200 | same `refundReference` again | the stored answer |
-| 200 | cannot be booked (see *Error handling*) | `{"status": "QUEUED_FOR_REVIEW"}`, saved to `processing_error`, alert raised |
-| 401 | bad signature | problem details, nothing saved |
-| 404 | payment not found (PSP retries later) | problem details, nothing saved |
-| 5xx | database down, timeout | PSP retries |
+| Code | When                                    | Body                                                                                             |
+|------|-----------------------------------------|--------------------------------------------------------------------------------------------------|
+| 200  | refund recorded                         | `{"status": "PARTIALLY_REFUNDED"}` or `{"status": "REFUNDED"}` (payment status after the refund) |
+| 200  | `success = false`                       | `{"status": "NOT_PROCESSED"}`, nothing saved                                                     |
+| 200  | same `refundReference` again            | the stored answer                                                                                |
+| 200  | cannot be booked (see *Error handling*) | `{"status": "QUEUED_FOR_REVIEW"}`, saved to `processing_error`, alert raised                     |
+| 401  | bad signature                           | problem details, nothing saved                                                                   |
+| 404  | payment not found (PSP retries later)   | problem details, nothing saved                                                                   |
+| 5xx  | database down, timeout                  | PSP retries                                                                                      |
 
 Queued for review: malformed body, same `refundReference` with a different
 body, amount more than left to refund, currency differs, `refundedAt` before
@@ -541,11 +541,11 @@ A negative balance is carried forward and recovered from future sales.
 
 PSPs normally block refunding more than was captured. It still happens:
 
-| Case | How | Frequency |
-|---|---|---|
+| Case                | How                                                                          | Frequency   |
+|---------------------|------------------------------------------------------------------------------|-------------|
 | refund + chargeback | merchant refunds, customer also disputes with the bank: money goes out twice | most common |
-| unreferenced refund | some PSPs allow a refund (credit) not linked to any payment | rare |
-| PSP or our bug | lost or duplicated event | rare |
+| unreferenced refund | some PSPs allow a refund (credit) not linked to any payment                  | rare        |
+| PSP or our bug      | lost or duplicated event                                                     | rare        |
 
 The money has already moved, so the strictly correct handling is **record
 it and hold it for review**, never reject. The guard saves the event to
@@ -569,13 +569,13 @@ answer 200**. A human resolves it later.
 
 ### What goes where
 
-| Situation | Where | Answer |
-|---|---|---|
-| Bad signature | nothing saved: could be an attacker spamming our DB | 401 |
-| Refund before its capture arrived | nothing saved: a PSP retry fixes it | 404 |
-| Database down, timeout | nothing saved: temporary | 5xx, PSP retries |
-| Unknown merchant, tax unresolved (capture) | `payment` as `HELD`: amounts are known, money is booked, only the owner is unclear | 200 |
-| Data wrong or contradictory | `processing_error`: cannot be booked at all | 200 `QUEUED_FOR_REVIEW` |
+| Situation                                  | Where                                                                              | Answer                  |
+|--------------------------------------------|------------------------------------------------------------------------------------|-------------------------|
+| Bad signature                              | nothing saved: could be an attacker spamming our DB                                | 401                     |
+| Refund before its capture arrived          | nothing saved: a PSP retry fixes it                                                | 404                     |
+| Database down, timeout                     | nothing saved: temporary                                                           | 5xx, PSP retries        |
+| Unknown merchant, tax unresolved (capture) | `payment` as `HELD`: amounts are known, money is booked, only the owner is unclear | 200                     |
+| Data wrong or contradictory                | `processing_error`: cannot be booked at all                                        | 200 `QUEUED_FOR_REVIEW` |
 
 Rule: **store only what a retry cannot fix.** `HELD` is for money we can
 book; `processing_error` is for events we cannot book.
@@ -604,13 +604,13 @@ the alert.
 
 Every error raises an alert. Resolution is **manual** for the task.
 
-| error_code | Event | Meaning | Resolution |
-|---|---|---|---|
-| `MALFORMED` | capture, refund | valid signature, broken body | fix the PSP mapping, replay |
-| `IDEMPOTENCY_CONFLICT` | capture, refund | same reference, different body | compare with the PSP, keep the correct version |
-| `OVER_REFUND` | refund | more than left to refund (e.g. refund + chargeback) | manual request to the PSP, then book or write off |
-| `CURRENCY_MISMATCH` | refund | refund currency differs from payment | manual with the PSP |
-| `INVALID_DATE` | refund | refund dated after today or before its payment's day | verify dates with the PSP, replay if valid |
+| error_code             | Event           | Meaning                                              | Resolution                                        |
+|------------------------|-----------------|------------------------------------------------------|---------------------------------------------------|
+| `MALFORMED`            | capture, refund | valid signature, broken body                         | fix the PSP mapping, replay                       |
+| `IDEMPOTENCY_CONFLICT` | capture, refund | same reference, different body                       | compare with the PSP, keep the correct version    |
+| `OVER_REFUND`          | refund          | more than left to refund (e.g. refund + chargeback)  | manual request to the PSP, then book or write off |
+| `CURRENCY_MISMATCH`    | refund          | refund currency differs from payment                 | manual with the PSP                               |
+| `INVALID_DATE`         | refund          | refund dated after today or before its payment's day | verify dates with the PSP, replay if valid        |
 
 Resolving = the human fixes the cause and deletes the row. There is no
 resolution logic: deletion is manual. A HELD payment also has a row here, so
@@ -775,11 +775,11 @@ merchant_payment_details         one merchant = one payment details
 
 Bank identifiers by country:
 
-| Country | Required |
-|---|---|
-| EU, UK | IBAN + BIC |
-| US | account number + routing number |
-| Australia | account number + BSB |
+| Country   | Required                        |
+|-----------|---------------------------------|
+| EU, UK    | IBAN + BIC                      |
+| US        | account number + routing number |
+| Australia | account number + BSB            |
 
 Known limitations (documented, not implemented):
 
@@ -797,11 +797,11 @@ startup, never queried per payment.
 
 One country can have several taxes:
 
-| Type | Example | Handled |
-|---|---|---|
-| Over time | Estonia 22% -> 24% (July 2025) | yes, `valid_from` |
-| By product category | DE: 19% standard, 7% e-books | yes, per merchant |
-| Stacked taxes | Canada GST + provincial; US state + county + city | no, US/CA out of scope |
+| Type                | Example                                           | Handled                |
+|---------------------|---------------------------------------------------|------------------------|
+| Over time           | Estonia 22% -> 24% (July 2025)                    | yes, `valid_from`      |
+| By product category | DE: 19% standard, 7% e-books                      | yes, per merchant      |
+| Stacked taxes       | Canada GST + provincial; US state + county + city | no, US/CA out of scope |
 
 ```
 tax_rate
@@ -926,13 +926,13 @@ query changes. With it, every balance is one query:
 An entry's **purpose** says whose money the line is, not which bank account
 it sits in. All money physically sits in our PSP balance.
 
-| id | purpose | purpose_key | Meaning |
-|---|---|---|---|
-| 1 | `PSP` | - | money that came in / went out via the PSP |
-| 2 | `TAX` | country | owed to that country's tax authority |
-| 3 | `REVENUE` | - | MoR fee |
-| 4 | `MERCHANT` | merchant id | owed to the merchant, paid out nightly |
-| 5 | `HELD` | merchant id, or null for unknown merchant | frozen, never paid out |
+| id | purpose    | purpose_key                               | Meaning                                   |
+|----|------------|-------------------------------------------|-------------------------------------------|
+| 1  | `PSP`      | -                                         | money that came in / went out via the PSP |
+| 2  | `TAX`      | country                                   | owed to that country's tax authority      |
+| 3  | `REVENUE`  | -                                         | MoR fee                                   |
+| 4  | `MERCHANT` | merchant id                               | owed to the merchant, paid out nightly    |
+| 5  | `HELD`     | merchant id, or null for unknown merchant | frozen, never paid out                    |
 
 ```
 ledger_transaction                  one money event
@@ -1139,18 +1139,24 @@ balance still sums the whole ledger for a merchant.
 - Answer a live balance as **last snapshot + entries since**, not a full sum.
   Below ~100M entries the full sum is fine; this is the fix when it is not.
 
-### 6. Metrics and alerts
+### 6. Metrics, alerts and log shipping
 
 Nothing is exported today. The minimum set:
 
-| Signal | Alert when | Why |
-|---|---|---|
-| Ledger imbalance: `SUM(amount)` per transaction | `<> 0`, ever | Double entry is broken. Page immediately. |
-| `processing_error` open rows | count > 0, and age of the oldest row | The quarantine is a work queue; an old row is unrecovered money. |
-| `IDEMPOTENCY_CONFLICT` rate | any sustained rate | The PSP is replaying a reference with a different body. |
-| Payout / remittance stuck in `COMPUTED` | older than one cycle | Money computed but never sent. |
-| DB saturation: connection pool wait, replication lag, oldest transaction age | pool near capacity, lag > 30s | Precedes every outage this design can have. |
-| Capture latency p99, 5xx rate | above SLO | PSP-visible health. |
+| Signal                                                                       | Alert when                           | Why                                                              |
+|------------------------------------------------------------------------------|--------------------------------------|------------------------------------------------------------------|
+| Ledger imbalance: `SUM(amount)` per transaction                              | `<> 0`, ever                         | Double entry is broken. Page immediately.                        |
+| `processing_error` open rows                                                 | count > 0, and age of the oldest row | The quarantine is a work queue; an old row is unrecovered money. |
+| `IDEMPOTENCY_CONFLICT` rate                                                  | any sustained rate                   | The PSP is replaying a reference with a different body.          |
+| Payout / remittance stuck in `COMPUTED`                                      | older than one cycle                 | Money computed but never sent.                                   |
+| DB saturation: connection pool wait, replication lag, oldest transaction age | pool near capacity, lag > 30s        | Precedes every outage this design can have.                      |
+| Capture latency p99, 5xx rate                                                | above SLO                            | PSP-visible health.                                              |
+
+Logs are text on stdout today. Production wants JSON
+(`net.logstash.logback.encoder.LogstashEncoder`) so `ref`, `event` and
+`outcome` become queryable fields rather than something to grep, plus a
+retention window short enough for GDPR Art. 5(1)(e). The policy for what may be
+logged is in README.md, "Logging".
 
 ### 7. Append-only enforced by the database
 
@@ -1205,25 +1211,25 @@ becomes a claim until k6 or `pgbench` against the real schema says so.
 
 ### Load verdict
 
-| Load | Verdict | Reasoning |
-|---|---|---|
-| 100 writes/s | **Realistic** | A capture is one transaction writing ~6 rows. Comfortably inside a single Postgres writer. |
-| 1,000 writes/s | **Plausible, unproven** | Needs suitable infrastructure - NVMe, tuned WAL and checkpoints, a pooled connection count that matches cores - plus 2-4 app instances. Nothing measured supports it. |
+| Load                    | Verdict                 | Reasoning                                                                                                                                                                                                                          |
+|-------------------------|-------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 100 writes/s            | **Realistic**           | A capture is one transaction writing ~6 rows. Comfortably inside a single Postgres writer.                                                                                                                                         |
+| 1,000 writes/s          | **Plausible, unproven** | Needs suitable infrastructure - NVMe, tuned WAL and checkpoints, a pooled connection count that matches cores - plus 2-4 app instances. Nothing measured supports it.                                                              |
 | 1,000 balance reports/s | **Not realistic today** | A live merchant balance is a full-history `SUM` over `ledger_entry`, and cost grows with the ledger. Snapshot + delta ([Production TODOs](#production-todos-documented-not-implemented) #5) is the prerequisite; re-measure after. |
-| Thousands of merchants | **Fine** | Keyset pagination and batched ids bound every response. Cost is per page, not per merchant. |
-| Millions of customers | **Fine** | A customer is not an entity in this schema. Transaction volume is what matters, not customer count. |
+| Thousands of merchants  | **Fine**                | Keyset pagination and batched ids bound every response. Cost is per page, not per merchant.                                                                                                                                        |
+| Millions of customers   | **Fine**                | A customer is not an entity in this schema. Transaction volume is what matters, not customer count.                                                                                                                                |
 
 ### Payment volume
 
 Load is measured in **payments per second**, not customers.
 Black Friday peak is assumed ~10x the daily average.
 
-| Payments/day | Avg / peak TPS | Status | What breaks first | Fix |
-|---|---|---|---|---|
-| 1M | 12 / 120 | design target, unmeasured | nothing expected | - |
-| 10M | 120 / 1.2k | design target, unmeasured | DB connections | connection pool, 2-4 app instances |
-| 100M | 1.2k / 12k | needs changes | single DB writer; hot accounts (e.g. tax DE); report sums slow; nightly job too heavy | shard by merchant; balance snapshots; job per shard in parallel |
-| 1B+ | 12k / 120k+ | redesign | sync posting cannot absorb spikes; idempotency data ~1B rows/day | durable queue in front (ack after enqueue, post async); purpose-built ledger DB; idempotency partitioned by day, dropped after 30 days; multi-region |
+| Payments/day | Avg / peak TPS | Status                    | What breaks first                                                                     | Fix                                                                                                                                                  |
+|--------------|----------------|---------------------------|---------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 1M           | 12 / 120       | design target, unmeasured | nothing expected                                                                      | -                                                                                                                                                    |
+| 10M          | 120 / 1.2k     | design target, unmeasured | DB connections                                                                        | connection pool, 2-4 app instances                                                                                                                   |
+| 100M         | 1.2k / 12k     | needs changes             | single DB writer; hot accounts (e.g. tax DE); report sums slow; nightly job too heavy | shard by merchant; balance snapshots; job per shard in parallel                                                                                      |
+| 1B+          | 12k / 120k+    | redesign                  | sync posting cannot absorb spikes; idempotency data ~1B rows/day                      | durable queue in front (ack after enqueue, post async); purpose-built ledger DB; idempotency partitioned by day, dropped after 30 days; multi-region |
 
 The 1.2k peak in the 10M row is the one to be most careful with: it is the
 threshold where "plausible" turns into "must be proven", and it has not been.

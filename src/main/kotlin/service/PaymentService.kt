@@ -12,10 +12,10 @@ import org.example.model.enums.ProcessingErrorCode
 import org.example.model.enums.TaxCategory
 import org.example.repository.PaymentStore
 import org.example.repository.BasisPoints
-import org.slf4j.LoggerFactory
 import java.time.Clock
 import org.example.utils.Constants
 import org.example.api.randomUuid
+import org.example.utils.logger
 
 /**
  * Decides everything WITHOUT touching the database, then writes once.
@@ -42,7 +42,7 @@ class PaymentService(
     private val vatIdRules: VatIdRules = VatIdRules(),
     private val clock: Clock = Clock.systemUTC(),
 ) {
-    private val log = LoggerFactory.getLogger(PaymentService::class.java)
+    private val log = logger<PaymentService>()
 
     suspend fun createPayment(request: PaymentModel, rawPayload: String = "{}"): LedgerResult {
         // TODO store failed payments for reconciliation and support history. Needs the
@@ -50,7 +50,7 @@ class PaymentService(
         //      same reference can arrive FAILED then SUCCESS, and a stored FAILED row would
         //      swallow the success.
         if (!request.success) {
-            log.info("payment {} failed at the PSP, nothing stored", request.pspReference)
+            log.info("outcome=psp_failed nothing stored")
             return LedgerResult.NothingToRecord
         }
 
@@ -126,7 +126,7 @@ class PaymentService(
         if (request.paymentTime.isBefore(now.minus(Constants.Dates.PAYMENT_MAX_DRIFT)) ||
             request.paymentTime.isAfter(now.plus(Constants.Dates.PAYMENT_MAX_DRIFT))
         ) {
-            log.warn("payment {} has suspicious paymentTime {} (received at {})", request.pspReference, request.paymentTime, now)
+            log.warn("event=invalid_date paymentTime={} receivedAt={} maxDrift={}", request.paymentTime, now, Constants.Dates.PAYMENT_MAX_DRIFT)
             errors += LedgerError(
                 ProcessingErrorCode.INVALID_DATE,
                 request.pspReference,
@@ -134,7 +134,7 @@ class PaymentService(
             )
         }
         if (invalidVatId) {
-            log.warn("payment {} contains an invalid VAT ID for {}", request.pspReference, taxCountry)
+            log.warn("event=invalid_vat_id country={}", taxCountry)
             errors += LedgerError(
                 ProcessingErrorCode.INVALID_VAT_ID,
                 request.pspReference,

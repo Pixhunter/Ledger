@@ -4,7 +4,6 @@ import org.example.model.ProcessingError
 import org.example.model.enums.EventType
 import org.example.model.enums.ProcessingErrorCode
 import org.example.repository.ProcessingErrorStore
-import org.slf4j.LoggerFactory
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.CancellationException
 import org.example.repository.PayoutStore
@@ -15,6 +14,7 @@ import java.util.UUID
 import org.example.utils.Constants
 import org.example.api.randomUuid
 import org.example.model.MerchantBalance
+import org.example.utils.logger
 
 /**
  * Closes the day: snapshots every merchant's balance, then turns the positive
@@ -37,7 +37,7 @@ class PayoutCalculationJob(
     private val batchSize: Int = Constants.Jobs.BATCH_SIZE,
     private val reportingZone: ZoneId = Constants.Jobs.REPORTING_ZONE,
 ) {
-    private val log = LoggerFactory.getLogger(PayoutCalculationJob::class.java)
+    private val log = logger<PayoutCalculationJob>()
 
     suspend fun run(payoutDate: LocalDate): List<MerchantBalance> {
         require(batchSize in 1..Constants.Jobs.MAX_BATCH_SIZE)
@@ -60,7 +60,7 @@ class PayoutCalculationJob(
             } catch (failure: Throwable) {
                 if (failure is CancellationException) throw failure
                 failures += failure
-                log.error("daily balance batch ending at {} failed", balances.last().merchantId, failure)
+                log.error("event=payout_run step=snapshot lastMerchant={} outcome=failed", balances.last().merchantId, failure)
             }
 
             val payable = balances.filter { it.amount.signum() > 0 && !it.suspended }
@@ -71,7 +71,7 @@ class PayoutCalculationJob(
             } catch (failure: Throwable) {
                 if (failure is CancellationException) throw failure
                 failures += failure
-                log.error("payout batch ending at {} failed", balances.last().merchantId, failure)
+                log.error("event=payout_run step=compute lastMerchant={} outcome=failed", balances.last().merchantId, failure)
             }
 
             val processingErrors = mutableListOf<ProcessingError>()
@@ -99,7 +99,7 @@ class PayoutCalculationJob(
             throw PayoutCalculationFailed(payoutDate, failures)
         }
 
-        log.info("payout run {}: {} computed", payoutDate, computed.size)
+        log.info("event=payout_run date={} computed={}", payoutDate, computed.size)
         return computed
     }
 
@@ -131,7 +131,7 @@ class PayoutCalculationJob(
             } catch (failure: Throwable) {
                 if (failure is CancellationException) throw failure
                 lastFailure = failure
-                log.warn("{} failed (attempt {}/{})", name, attempt + 1, retryAttempts, failure)
+                log.warn("event=retry step={} attempt={}/{}", name, attempt + 1, retryAttempts, failure)
                 if (attempt + 1 < retryAttempts && retryDelayMs > 0) delay(retryDelayMs)
             }
         }

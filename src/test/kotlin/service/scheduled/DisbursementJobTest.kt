@@ -12,6 +12,7 @@ import java.util.UUID
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import org.example.utils.sensitive
 
 class DisbursementJobTest {
 
@@ -22,7 +23,7 @@ class DisbursementJobTest {
         kind = TransferKind.PAYOUT,
         key = merchant.toString(),
         period = date,
-        destination = "acct-1",
+        destination = "acct-1".sensitive(),
         amount = BigDecimal("97.00"),
     )
 
@@ -30,7 +31,7 @@ class DisbursementJobTest {
         kind = TransferKind.TAX,
         key = "ES",
         period = date,
-        destination = "ES",
+        destination = "ES".sensitive(),
         amount = BigDecimal("21.00"),
     )
 
@@ -42,7 +43,7 @@ class DisbursementJobTest {
         assertEquals(1, DisbursementJob(TransferKind.PAYOUT, store, client).run())
 
         assertEquals(listOf("payout-$merchant-$date"), client.references)
-        assertEquals("acct-1", client.sent.single().destination)
+        assertEquals("acct-1", client.sent.single().destination.reveal())
         assertEquals("ext-payout-$merchant-$date", store.marked.single().second)
         assertTrue(store.released.isEmpty())
     }

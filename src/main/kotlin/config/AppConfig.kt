@@ -83,7 +83,13 @@ data class DatabaseConfig(
     val connectionTimeoutMs: Long = 5_000,
     val statementTimeoutMs: Long = 30_000,
     val lockTimeoutMs: Long = 5_000,
-)
+) {
+    /**
+     * A JDBC url carries credentials in most deployments, so neither it nor the
+     * password is printable. GDPR Art. 32. Jackson reads the fields, not this.
+     */
+    override fun toString() = "DatabaseConfig(poolSize=$poolSize)"
+}
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class MorConfig(
@@ -104,4 +110,8 @@ data class PspConfig(
     val secret: String? = null,
     /** Local only: also accept the secret itself as the header, so Swagger can authorise. */
     val allowSecretHeader: Boolean = false,
-)
+) {
+    /** GDPR Art. 32: the secret is never printable, only its presence. */
+    override fun toString() = "PspConfig(secret=${if (secret == null) "absent" else "present"}, " +
+        "allowSecretHeader=$allowSecretHeader)"
+}

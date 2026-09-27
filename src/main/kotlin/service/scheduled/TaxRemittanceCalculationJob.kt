@@ -2,10 +2,10 @@ package org.example.service.scheduled
 
 import org.example.model.TaxLiability
 import org.example.repository.TaxRemittanceStore
-import org.slf4j.LoggerFactory
 import java.time.LocalDate
 import java.time.ZoneId
 import org.example.utils.Constants
+import org.example.utils.logger
 
 /**
  * Closes a filing period: what a country owes for it becomes one remittance
@@ -26,7 +26,7 @@ class TaxRemittanceCalculationJob(
     private val remittances: TaxRemittanceStore,
     private val reportingZone: ZoneId = Constants.Jobs.REPORTING_ZONE,
 ) {
-    private val log = LoggerFactory.getLogger(TaxRemittanceCalculationJob::class.java)
+    private val log = logger<TaxRemittanceCalculationJob>()
 
     suspend fun run(periodStart: LocalDate): List<TaxLiability> {
         val periodEnd = periodStart.plusMonths(1).atStartOfDay(reportingZone).toInstant()
@@ -36,11 +36,11 @@ class TaxRemittanceCalculationJob(
             .filter { it.amount.signum() > 0 }
             .forEach { liability ->
                 val filed = remittances.computeRemittance(liability.country, periodStart, periodEnd)
-                if (filed == null) log.info("{} for {} already filed or nothing due", liability.country, periodStart)
+                if (filed == null) log.info("event=tax_filing country={} period={} outcome=skipped", liability.country, periodStart)
                 else computed += liability.copy(amount = filed)
             }
 
-        log.info("tax remittance {}: {} computed", periodStart, computed.size)
+        log.info("event=tax_run period={} computed={}", periodStart, computed.size)
         return computed
     }
 }

@@ -3,7 +3,8 @@ package org.example.api.adapter
 import org.example.repository.DueTransfer
 import org.example.repository.TransferClient
 import org.example.repository.TransferResult
-import org.slf4j.LoggerFactory
+import org.example.utils.maskTail
+import org.example.utils.logger
 
 /**
  * TODO replace per kind: the PSP wants a signed HTTP call with retries and a
@@ -11,12 +12,13 @@ import org.slf4j.LoggerFactory
  */
 class AcceptingTransferClient : TransferClient {
 
-    private val log = LoggerFactory.getLogger(AcceptingTransferClient::class.java)
+    private val log = logger<AcceptingTransferClient>()
 
     override suspend fun send(transfer: DueTransfer): TransferResult {
         log.info(
-            "{} to={} amount={} {}",
-            transfer.reference, transfer.destination, transfer.amount, transfer.currency,
+            "event=transfer kind={} ref={} amount={} currency={} destination={}",
+            transfer.kind, transfer.reference, transfer.amount, transfer.currency,
+            transfer.destination.reveal().maskTail(),
         )
         return TransferResult.Accepted("mock-${transfer.reference}")
     }

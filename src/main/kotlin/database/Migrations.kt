@@ -2,8 +2,8 @@ package org.example.database
 
 import org.example.utils.Constants
 import org.flywaydb.core.Flyway
-import org.slf4j.LoggerFactory
 import javax.sql.DataSource
+import org.example.utils.logger
 
 /**
  * Migrations run at application startup, not from a separate container.
@@ -19,7 +19,7 @@ import javax.sql.DataSource
  */
 object Migrations {
 
-    private val log = LoggerFactory.getLogger(Migrations::class.java)
+    private val log = logger<Migrations>()
 
     fun run(dataSource: DataSource) {
         val result = Flyway.configure()

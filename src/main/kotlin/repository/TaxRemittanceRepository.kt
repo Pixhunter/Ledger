@@ -19,6 +19,7 @@ import org.example.utils.Constants
 import org.example.api.randomUuid
 import org.example.api.io
 import org.example.model.TaxLiability
+import org.example.utils.sensitive
 
 class TaxRemittanceRepository(private val dsl: DSLContext) : TaxRemittanceStore, TransferStore {
 
@@ -209,7 +210,7 @@ class TaxRemittanceRepository(private val dsl: DSLContext) : TaxRemittanceStore,
                 kind = TransferKind.TAX,
                 key = country,
                 period = row.get(1, LocalDate::class.java)!!,
-                destination = country,
+                destination = country.sensitive(),
                 amount = row.get(2, BigDecimal::class.java)!!,
             )
         } }

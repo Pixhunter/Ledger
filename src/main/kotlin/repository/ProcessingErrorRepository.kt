@@ -6,11 +6,11 @@ import org.example.model.ProcessingError
 import org.jooq.DSLContext
 import org.jooq.JSONB
 import org.jooq.impl.DSL
-import org.slf4j.LoggerFactory
+import org.example.utils.logger
 
 class ProcessingErrorRepository(private val dsl: DSLContext) : ProcessingErrorStore {
 
-    private val log = LoggerFactory.getLogger(ProcessingErrorRepository::class.java)
+    private val log = logger<ProcessingErrorRepository>()
 
     override suspend fun save(error: ProcessingError) = saveAll(listOf(error))
 
@@ -22,7 +22,10 @@ class ProcessingErrorRepository(private val dsl: DSLContext) : ProcessingErrorSt
         }
 
         if (stored > 0) {
-            log.error("stored {} new processing error(s)", stored)
+            log.warn(
+                "event=quarantine stored={} codes={}",
+                stored, errors.map { it.code }.distinct(),
+            )
         }
     }
 }

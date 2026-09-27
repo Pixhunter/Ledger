@@ -21,6 +21,7 @@ import org.example.api.randomUuid
 import org.example.model.MerchantBalance
 import org.example.model.enums.MerchantStatus
 import java.math.BigDecimal
+import org.example.utils.sensitive
 
 class PayoutRepository(private val dsl: DSLContext) : PayoutStore, TransferStore {
 
@@ -264,7 +265,7 @@ class PayoutRepository(private val dsl: DSLContext) : PayoutStore, TransferStore
                     kind = TransferKind.PAYOUT,
                     key = row.get(0, UUID::class.java)!!.toString(),
                     period = row.get(1, LocalDate::class.java)!!,
-                    destination = row.get(2, String::class.java)!!,
+                    destination = row.get(2, String::class.java)!!.sensitive(),
                     amount = row.get(3, BigDecimal::class.java)!!,
                 )
             }

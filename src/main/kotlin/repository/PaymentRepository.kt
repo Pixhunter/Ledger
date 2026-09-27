@@ -18,15 +18,15 @@ import org.example.model.enums.PaymentStatus
 import org.example.model.enums.TaxCategory
 import org.jooq.DSLContext
 import org.jooq.impl.DSL
-import org.slf4j.LoggerFactory
 import java.time.ZoneOffset
 import java.util.UUID
 import java.math.BigDecimal
 import org.example.api.randomUuid
+import org.example.utils.logger
 
 class PaymentRepository(private val dsl: DSLContext) : PaymentStore {
 
-    private val log = LoggerFactory.getLogger(PaymentRepository::class.java)
+    private val log = logger<PaymentRepository>()
 
     override suspend fun insert(
         payment: PaymentEntity,
@@ -114,7 +114,7 @@ class PaymentRepository(private val dsl: DSLContext) : PaymentStore {
                     )
                 }
 
-                log.info("replay of {}, nothing written", payment.pspReference)
+                log.info("outcome=replay nothing written")
 
                 return@transactionResult LedgerWrite.Duplicate(
                     enumById<PaymentStatus>(existing.status)
@@ -173,10 +173,10 @@ class PaymentRepository(private val dsl: DSLContext) : PaymentStore {
             insertProcessingErrors(db, errors)
 
             log.info(
-                "stored {} as {}{}",
-                payment.pspReference,
+                "event=stored status={} held={} entries={}",
                 payment.status,
-                payment.holdReasons.takeIf { it.isNotEmpty() }?.let { " ($it)" } ?: "",
+                payment.holdReasons.takeIf { it.isNotEmpty() } ?: "-",
+                errors.size,
             )
 
             LedgerWrite.Inserted(payment.status)

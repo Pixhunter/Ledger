@@ -103,7 +103,7 @@ class PayoutAndTaxIntegrationTest : LedgerApiIntegrationTestSupport() {
 
             val request = psp.sent.single()
             assertEquals("payout-$merchantId-$payoutDate", request.reference)
-            assertEquals("acct-merchant-1", request.destination)
+            assertEquals("acct-merchant-1", request.destination.reveal())
             assertEquals(0, request.amount.compareTo(owed))
 
             assertEquals(

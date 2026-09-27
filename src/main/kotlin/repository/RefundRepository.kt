@@ -23,15 +23,15 @@ import org.example.model.enums.TaxCategory
 import org.example.api.io
 import org.jooq.DSLContext
 import org.jooq.impl.DSL
-import org.slf4j.LoggerFactory
 import java.util.UUID
 import java.math.BigDecimal
 import java.time.ZoneOffset
 import org.example.api.randomUuid
+import org.example.utils.logger
 
 class RefundRepository(private val dsl: DSLContext) {
 
-    private val log = LoggerFactory.getLogger(RefundRepository::class.java)
+    private val log = logger<RefundRepository>()
 
     suspend fun findPayment(pspReference: String): PaymentEntity? = io {
         val rows = dsl.select()
@@ -121,7 +121,7 @@ class RefundRepository(private val dsl: DSLContext) {
                     )
                 }
 
-                log.info("replay of refund {}, nothing written", refund.refundReference)
+                log.info("outcome=replay nothing written")
                 return@transactionResult LedgerWrite.Duplicate(paymentStatus(db, refund.paymentId))
             }
 
@@ -172,7 +172,7 @@ class RefundRepository(private val dsl: DSLContext) {
                 .where(PAYMENT.ID.eq(refund.paymentId))
                 .execute()
 
-            log.info("stored refund {} as {}", refund.refundReference, status)
+            log.info("event=stored status={} amount={}", status, refund.amount)
 
             if (refundedSoFar.compareTo(gross) > 0) {
                 insertProcessingError(

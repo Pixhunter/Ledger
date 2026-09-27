@@ -4,20 +4,13 @@ import org.example.utils.Constants
 import org.example.model.enums.Currency
 import java.math.BigDecimal
 import java.time.LocalDate
+import org.example.utils.Sensitive
 
-/**
- * Money leaving the MoR: a merchant payout or a tax remittance. Both claim a
- * row, call an external party, and either mark it sent or release it for the
- * next run, so both are one job over one row shape.
- *
- * [key] is the merchant id or the country; [period] the payout date or the
- * filing period; [destination] what the receiving side is addressed by.
- */
 data class DueTransfer(
     val kind: TransferKind,
     val key: String,
     val period: LocalDate,
-    val destination: String,
+    val destination: Sensitive<String>,
     val amount: BigDecimal,
     val currency: Currency = Currency.EUR,
 ) {

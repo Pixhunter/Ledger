@@ -1,11 +1,10 @@
 <configuration>
+    <property name="PATTERN"
+              value="%d{HH:mm:ss.SSS} %highlight(%-5level) %cyan(%logger{0}) %magenta([%X{event:-}%X{ref:- }]) - %msg%n"/>
 
-    <!-- %logger{0} prints the simple class name and never truncates it.
-         %logger{20} (the old setting) abbreviates package segments once the
-         name passes 20 characters, which is why messages looked cut. -->
     <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
         <encoder>
-            <pattern>%d{HH:mm:ss.SSS} %highlight(%-5level) %cyan(%logger{0}) - %msg%n</pattern>
+            <pattern>${PATTERN}</pattern>
         </encoder>
     </appender>
 
@@ -19,8 +18,10 @@
     <logger name="org.jooq" level="WARN"/>
     <logger name="org.flywaydb" level="INFO"/>
     <logger name="com.zaxxer.hikari" level="WARN"/>
+    <logger name="org.example" level="${log.level:-INFO}"/>
 
-    <!-- Your own packages, tune freely. -->
-    <logger name="org.example" level="DEBUG"/>
+    <!-- TODO production: swap the console encoder for JSON
+         (net.logstash.logback.encoder.LogstashEncoder) so ref, event and
+         outcome become queryable fields instead of text to grep. -->
 
 </configuration>

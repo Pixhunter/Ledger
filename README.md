@@ -232,6 +232,56 @@ PITR; and external, production-like capacity tests.
 
 Full list with reasoning: README.md, "Production TODOs".
 
+## Logging
+
+One line per money event says how it ended, and one correlation id ties every
+line about it together.
+
+`LedgerController` puts the PSP or refund reference into the SLF4J MDC as soon
+as it is parsed, so a line written deep in a service - the tax-country vote, a
+repository replay - carries it without being handed one. `io()` wraps the JDBC
+dispatcher hop in `MDCContext`, because the MDC is thread-local and would
+otherwise be empty below the first suspension point. Format is `key=value`,
+rendered as `HH:mm:ss.SSS LEVEL Logger [event ref] - outcome=... took=...ms`.
+
+| Level | Means                                                                    |
+|-------|--------------------------------------------------------------------------|
+| ERROR | Money at risk or an invariant broken: a rejected transfer, a failed job  |
+| WARN  | An event was quarantined or a request rejected                           |
+| INFO  | One outcome line per money event; one summary per job run                |
+| DEBUG | Raw tax-country signals, per-request amounts - personal data, local only |
+
+### What must never be logged
+
+`utils/SensitiveLogging.kt` carries the full policy and the articles behind it.
+The short version:
+
+- **In full:** `pspReference`, `refundReference`, `merchantId`, amount,
+  currency, dates. Pseudonymous or non-identifying, and required to trace an
+  incident - GDPR Art. 4(5), Art. 32.
+- **The decision, not the inputs:** `taxCountry=ES agreeing=2/3`. The three raw
+  country signals form a location profile, so they are DEBUG only - Art.
+  5(1)(c) data minimisation. `ipCountry` derives from an IP, which is personal
+  data (CJEU *Breyer*, C-582/14).
+- **Never:** account identifiers (`pspAccountId`, `iban`), account holder,
+  address, `customerVatId` (for a sole trader it can encode a national
+  identifier), the JDBC url, the PSP secret - Art. 32.
+
+Enforced by type, not by review: a field that must not be logged is a
+`Sensitive<T>`, whose `toString()` is `***`. Interpolation, `{}` placeholders
+and generated `toString()`s therefore cannot leak it, and `reveal()` marks every
+place the real value is used. Config and seed classes holding secrets override
+`toString()` for the same reason.
+
+This service is never sent a card number, CVV or cardholder name - only
+`cardIssuingCountry` - which is what keeps the ledger out of PCI DSS storage
+scope (v4.0 Reqs 3.3, 3.4, where a log counts as storage). Adding a card field
+would change that.
+
+Logs are not the record of account: invoice retention (Directive 2006/112/EC
+Arts. 244-248) justifies keeping data in the **database** for years, never in
+logs, which fall under Art. 5(1)(e) storage limitation.
+
 ## Expected scale
 
 - Capacity is measured in financial events

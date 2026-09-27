@@ -4,12 +4,12 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import org.slf4j.LoggerFactory
 import java.time.Duration
 import java.time.LocalTime
 import java.time.ZoneId
 import java.time.ZonedDateTime
 import org.example.utils.Constants
+import org.example.utils.logger
 
 /**
  * Closing the day and moving the money are an hour apart on purpose: if the
@@ -29,7 +29,7 @@ class PayoutScheduler(
     private val taxMonitor: TaxBalanceMonitorJob,
     private val zone: ZoneId = Constants.Jobs.REPORTING_ZONE,
 ) {
-    private val log = LoggerFactory.getLogger(PayoutScheduler::class.java)
+    private val log = logger<PayoutScheduler>()
 
     fun start(scope: CoroutineScope) {
         scope.daily(Constants.Jobs.PAYOUT_CALCULATION_AT) {
@@ -54,7 +54,7 @@ class PayoutScheduler(
     private fun CoroutineScope.daily(at: LocalTime, block: suspend () -> Unit) = launch {
         while (isActive) {
             delay(until(at).toMillis())
-            runCatching { block() }.onFailure { log.error("scheduled payout job at {} failed", at, it) }
+            runCatching { block() }.onFailure { log.error("event=scheduled_job at={} outcome=failed", at, it) }
         }
     }
 

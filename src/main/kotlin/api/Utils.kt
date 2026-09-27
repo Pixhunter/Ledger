@@ -6,6 +6,7 @@ import org.example.utils.Constants
 import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
+import kotlinx.coroutines.slf4j.MDCContext
 
 fun String.toUuid(field: String): UUID =
     runCatching { UUID.fromString(this) }
@@ -37,4 +38,4 @@ fun randomUuid(): UUID = UUID.randomUUID()
 
 /** Runs blocking JDBC work away from Ktor's request threads. */
 internal suspend inline fun <R> io(crossinline block: () -> R): R =
-    withContext(Dispatchers.IO) { block() }
+    withContext(Dispatchers.IO + MDCContext()) { block() }
