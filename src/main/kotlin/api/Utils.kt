@@ -18,7 +18,7 @@ fun String.toCountry(field: String): String {
 }
 
 fun String.toInstant(field: String): Instant =
-    runCatching { Instant.parse(this) }
+    runCatching { Instant.parse(this).truncatedTo(Constants.Dates.STORED_PRECISION) }
         .getOrElse { throw IllegalArgumentException("$field is not an ISO-8601 instant: '$this'") }
 
 fun String.toLocalDate(field: String): LocalDate =

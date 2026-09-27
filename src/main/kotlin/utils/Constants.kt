@@ -3,6 +3,7 @@ package org.example.utils
 import java.math.BigDecimal
 import java.time.Duration
 import java.time.LocalDate
+import java.time.temporal.ChronoUnit
 import java.time.LocalTime
 import java.time.ZoneId
 
@@ -59,6 +60,15 @@ object Constants {
          * and it belongs in the error table, not in the ledger.
          */
         val REFUND_MAX_FUTURE_DRIFT: Duration = Duration.ofDays(2)
+
+        /**
+         * Postgres timestamptz keeps microseconds. Instant.now() keeps
+         * nanoseconds on Linux and microseconds on macOS, so an inbound
+         * timestamp is truncated to what the column can hold. Otherwise a
+         * replay read back from the row never equals the request that wrote
+         * it, and every PSP retry is quarantined as an idempotency conflict.
+         */
+        val STORED_PRECISION: ChronoUnit = ChronoUnit.MICROS
     }
 
     object Fees {

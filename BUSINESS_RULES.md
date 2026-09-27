@@ -23,14 +23,14 @@ ledger service.
 An authenticated, readable capture is accepted because the customer was already
 charged.
 
-| Event                          | Result                                                 |
-|--------------------------------|--------------------------------------------------------|
-| Known merchant and tax         | `SUCCESS`: tax + MoR revenue + merchant balance        |
-| Unknown merchant or tax        | Save as `HELD`; write an exception; manual review      |
-| `success = false` at the PSP   | Return `200`; write nothing                            |
-| Exact retry                    | Return `200`; write nothing                            |
+| Event                          | Result                                                  |
+|--------------------------------|---------------------------------------------------------|
+| Known merchant and tax         | `SUCCESS`: tax + MoR revenue + merchant balance         |
+| Unknown merchant or tax        | Save as `HELD`; write an exception; manual review       |
+| `success = false` at the PSP   | Return `200`; write nothing                             |
+| Exact retry                    | Return `200`; write nothing                             |
 | Same reference, different data | Keep the first event; write an exception; no second row |
-| Bad signature/body             | Return `401`/`400`                                     |
+| Bad signature/body             | Return `401`/`400`                                      |
 
 The merchant allowlist is empty until `mor.merchant` is read, so every capture
 is `HELD` today. The rule is implemented; the source of merchants is not.
@@ -40,18 +40,18 @@ is `HELD` today. The rule is implemented; the source of merchants is not.
 A successful refund is also an existing money fact. Full, partial and multiple
 refunds are supported.
 
-| Event                               | Result                                                                 |
-|-------------------------------------|------------------------------------------------------------------------|
-| Missing payment                     | Return `404`; retry after payment arrives                              |
-| Exact retry                         | Return `200`; write nothing                                            |
-| Same reference, different data      | Keep the first event; write an exception; no second row                |
+| Event                               | Result                                                                         |
+|-------------------------------------|--------------------------------------------------------------------------------|
+| Missing payment                     | Return `404`; retry after payment arrives                                      |
+| Exact retry                         | Return `200`; write nothing                                                    |
+| Same reference, different data      | Keep the first event; write an exception; no second row                        |
 | Total refunds exceed payment amount | Save full refund; close payment; post excess to `SUSPENSE`; write an exception |
-| Bad signature/body                  | Return `401`/`400`                                                     |
+| Bad signature/body                  | Return `401`/`400`                                                             |
 
-| Revenue policy   | Partial refund                  | Full refund   | Today                         |
-|------------------|---------------------------------|---------------|-------------------------------|
-| Keep fee         | Merchant funds refund after tax | Keep full fee | Always                        |
-| Return fee       | Return proportional fee         | Return full fee | Not implemented - see below |
+| Revenue policy | Partial refund                  | Full refund     | Today                       |
+|----------------|---------------------------------|-----------------|-----------------------------|
+| Keep fee       | Merchant funds refund after tax | Keep full fee   | Always                      |
+| Return fee     | Return proportional fee         | Return full fee | Not implemented - see below |
 
 Returning the fee depends on who is at fault, and the `reason` in the webhook
 body cannot carry that: the signature proves the PSP sent it, not who wrote it.
@@ -88,21 +88,21 @@ of now (`RefundService.MAX_FUTURE_DRIFT`), otherwise the refund is
 `INVALID_DATE` in the error table. Captures allow 7 days either way
 (`PaymentService.MAX_DATE_DRIFT`) and only warn.
 
-| Report | Question | Caller |
-|--------|----------|--------|
-| `GET /v1/balances/tax` | What does one country's tax authority get, over a filing period? | Accounting, filing the return |
-| `GET /v1/balances/merchants` | What is owed to merchants right now? | MoR operations |
+| Report                       | Question                                                         | Caller                        |
+|------------------------------|------------------------------------------------------------------|-------------------------------|
+| `GET /v1/balances/tax`       | What does one country's tax authority get, over a filing period? | Accounting, filing the return |
+| `GET /v1/balances/merchants` | What is owed to merchants right now?                             | MoR operations                |
 
 ### Tax, per country, per period
 
 `country` is required; `from` and `to` are optional. Without them the answer is
 the balance now. With them it is a filing period:
 
-| Field | Meaning |
-|-------|---------|
-| `owedAtStart` | Owed immediately before the window |
-| `movement` | Change inside it: sales add, refunds and remittances subtract |
-| `owedAtEnd` | Owed at the end - the number the return is filed for |
+| Field         | Meaning                                                       |
+|---------------|---------------------------------------------------------------|
+| `owedAtStart` | Owed immediately before the window                            |
+| `movement`    | Change inside it: sales add, refunds and remittances subtract |
+| `owedAtEnd`   | Owed at the end - the number the return is filed for          |
 
 One country per call. A tax return is filed per country, so a caller preparing
 a return asks for one; batching is a list parameter on the same query and is
@@ -147,13 +147,13 @@ Full list in README.md, "Production TODOs".
 
 ![Settlement cycle](docs/images/settlement-cycle.svg)
 
-| Process                   | Rule                                                 | Status      |
-|---------------------------|------------------------------------------------------|-------------|
-| Merchant payout           | Daily positive balance; exclude `HELD`; fixed cutoff | Implemented, mock transfer client |
-| Negative merchant balance | Carry forward; alert after 14 days                   | Detection implemented; recovery planned |
-| Tax settlement            | Pay per country, monthly on the 5th for the month before | Implemented, mock transfer client |
-| Tax rates                 | Version with `valid_from`; cache; freeze on capture  | Implemented |
-| PSP reconciliation        | Compare PSP and ledger totals daily                  | Planned     |
+| Process                   | Rule                                                     | Status                                  |
+|---------------------------|----------------------------------------------------------|-----------------------------------------|
+| Merchant payout           | Daily positive balance; exclude `HELD`; fixed cutoff     | Implemented, mock transfer client       |
+| Negative merchant balance | Carry forward; alert after 14 days                       | Detection implemented; recovery planned |
+| Tax settlement            | Pay per country, monthly on the 5th for the month before | Implemented, mock transfer client       |
+| Tax rates                 | Version with `valid_from`; cache; freeze on capture      | Implemented                             |
+| PSP reconciliation        | Compare PSP and ledger totals daily                      | Planned                                 |
 
 Hourly payout is a later option. It changes scheduling, not accounting.
 
@@ -228,14 +228,14 @@ replay; negative-balance recovery, as opposed to detection; an external
 tax-rate feed, the versioning and freeze-at-capture being already in place;
 PSP reconciliation; reversal of failed payouts and remittances, and
 chargebacks; auth and RBAC on the reports; database failover, backups and
-PITR; load tests.
+PITR; and external, production-like capacity tests.
 
 Full list with reasoning: README.md, "Production TODOs".
 
 ## Expected scale
 
 - Capacity is measured in financial events
-- Expectations - not benchmarks.
+- Capacity targets are planning estimates; measured results are below.
 - “Users” means registered accounts;
 - “customers” means accounts with at least one payment.
 
@@ -246,17 +246,39 @@ Full list with reasoning: README.md, "Production TODOs".
 | Growth          |  20 million |     230 / 2.3k |  6.7m / 33m |  100 million |       50 million |  10 thousand | Read replicas, parallel payouts and snapshots; evaluate merchant sharding      |
 | Large scale     | 100 million |     1.2k / 12k |  33m / 167m |  500 million |      250 million | 100 thousand | Architecture change: queue, database shards and per-shard tax aggregation      |
 
-Those numbers must be changed after the load testing!!!
+### Measured local benchmark
+
+The opt-in mixed-load test was run three times for one minute. Each run started
+with 10,000 payments and 1,000 merchants, then used 32 concurrent workers:
+60% new payments, 20% unique refunds on one hot payment, 10% duplicate
+payments and 10% duplicate refunds.
+
+|        Run |   Requests |      Throughput |        p50 |          p95 |          p99 |   Payout job |    Tax job | Result   |
+|-----------:|-----------:|----------------:|-----------:|-------------:|-------------:|-------------:|-----------:|----------|
+|          1 |     43,436 |     722.2 req/s |     3.7 ms |     196.4 ms |     253.4 ms |     1,981 ms |     831 ms | PASS     |
+|          2 |     44,403 |     738.5 req/s |     3.6 ms |     191.2 ms |     253.5 ms |     1,606 ms |     856 ms | PASS     |
+|          3 |     46,310 |     770.2 req/s |     3.5 ms |     187.7 ms |     259.5 ms |     1,732 ms |     799 ms | PASS     |
+| **Median** | **44,403** | **738.5 req/s** | **3.6 ms** | **191.2 ms** | **253.5 ms** | **1,732 ms** | **831 ms** | **PASS** |
+
+All requests succeeded. Idempotency, row counts, payment splits, balanced
+double-entry transactions, payout balances, tax balances and retained revenue
+were verified from PostgreSQL after each run.
+
+These are laptop results using Ktor's in-process test engine and a PostgreSQL
+Testcontainer. They measure application and database concurrency without
+network or proxy overhead. They demonstrate correctness under this workload;
+they are not a production SLA or proof of 1,000 req/s capacity.
 
 ### Verdict per load, today
 
-| Load | Verdict |
-|---|---|
-| 100 writes/s | Realistic |
-| 1,000 writes/s | Plausible, unproven - needs suitable PostgreSQL infrastructure |
-| 1,000 balance reports/s | Not realistic: the live balance is a full-history `SUM`. Needs snapshot + delta first |
-| Thousands of merchants | Fine - keyset pagination and batched ids bound every response |
-| Millions of customers | Fine - a customer is not an entity here; only event volume matters |
+| Load                     | Verdict                                                                               |
+|--------------------------|---------------------------------------------------------------------------------------|
+| 100 mixed writes/s       | Demonstrated with substantial headroom in the local benchmark                         |
+| About 740 mixed writes/s | Demonstrated median for one minute; zero failures                                     |
+| 1,000 writes/s           | Not yet demonstrated; requires external load testing and production-like PostgreSQL   |
+| 1,000 balance reports/s  | Not realistic: the live balance is a full-history `SUM`. Needs snapshot + delta first |
+| Thousands of merchants   | Fine - keyset pagination and batched ids bound every response                         |
+| Millions of customers    | Fine - a customer is not an entity here; only event volume matters                    |
 
 Writes and reports scale differently: the report path breaks first, and it is
 not covered by the events/day table above.
