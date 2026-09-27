@@ -3,10 +3,11 @@ package org.example
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.netty.Netty
 import org.example.config.AppConfig
-import org.example.db.Database
+import org.example.database.Database
 import kotlinx.coroutines.runBlocking
-import org.example.db.Migrations
-import org.example.merchant.MerchantSeeder
+import org.example.bootstrap.ledgerModule
+import org.example.database.Migrations
+import org.example.bootstrap.MerchantSeeder
 import org.example.repository.MerchantRepository
 import org.slf4j.LoggerFactory
 

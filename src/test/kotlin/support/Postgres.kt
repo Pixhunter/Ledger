@@ -1,8 +1,8 @@
 package org.example.support
 
 import org.example.config.DatabaseConfig
-import org.example.db.Database
-import org.example.db.Migrations
+import org.example.database.Database
+import org.example.database.Migrations
 import org.jooq.DSLContext
 import org.jooq.impl.DSL
 import org.testcontainers.DockerClientFactory
@@ -33,7 +33,12 @@ object Postgres {
                 url = container.jdbcUrl,
                 user = container.username,
                 password = container.password,
-                poolSize = 2,
+                // Must exceed the highest concurrency any test drives (4
+                // captures at once) plus the connection the test body itself
+                // uses, or requests queue for a connection and time out on a
+                // loaded CI runner. Serialization is enforced by row locks,
+                // not by starving the pool.
+                poolSize = 10,
             )
         )
         Migrations.run(dataSource)

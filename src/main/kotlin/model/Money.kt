@@ -3,7 +3,7 @@ package org.example.model
 import org.example.model.enums.Currency
 import java.math.BigDecimal
 import java.math.RoundingMode
-import org.example.Constants
+import org.example.utils.Constants
 
 /** Decimal money stored at four places and posted at the currency precision. */
 object Money {

@@ -31,6 +31,4 @@ done
 echo
 echo "Empty database ready."
 echo
-echo "Next:  ./scripts/db-migrate.sh     # applies migrations without needing the app to compile"
-echo "       ./scripts/jooq-generate.sh  # regenerate typed classes"
-echo "       ./gradlew run"
+echo "Next:  ./scripts/rebuild-all.sh   # migrate, regenerate jOOQ and schema.sql"

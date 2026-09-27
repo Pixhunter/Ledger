@@ -1,7 +1,7 @@
 package org.example.repository
 
-import org.example.db.Mapper
-import org.example.db.io
+import org.example.api.io
+import org.example.database.JsonbMapper
 import org.example.jooq.tables.references.LEDGER_ENTRY
 import org.example.jooq.tables.references.LEDGER_TRANSACTION
 import org.example.jooq.tables.references.PAYMENT
@@ -22,7 +22,7 @@ import org.slf4j.LoggerFactory
 import java.time.ZoneOffset
 import java.util.UUID
 import java.math.BigDecimal
-import org.example.randomUuid
+import org.example.api.randomUuid
 
 class PaymentRepository(private val dsl: DSLContext) : PaymentStore {
 
@@ -63,7 +63,7 @@ class PaymentRepository(private val dsl: DSLContext) : PaymentStore {
                 .set(PAYMENT.TAX_CATEGORY, payment.taxCategory?.id)
                 .set(PAYMENT.TAX_RATE_BPS, payment.taxRateBps)
                 .set(PAYMENT.REVERSE_CHARGE, payment.reverseCharge)
-                .set(PAYMENT.EVIDENCE, Mapper.toJsonb(payment.evidence))
+                .set(PAYMENT.EVIDENCE, JsonbMapper.toJsonb(payment.evidence))
                 .set(PAYMENT.STATUS, payment.status.id)
                 .set(PAYMENT.PAYMENT_TIME, payment.paymentTime.atOffset(ZoneOffset.UTC))
                 .onConflict(PAYMENT.PSP_REFERENCE)
@@ -94,7 +94,7 @@ class PaymentRepository(private val dsl: DSLContext) : PaymentStore {
                         existing.taxCategory?.let { enumById<TaxCategory>(it) } == payment.taxCategory &&
                         existing.taxRateBps == payment.taxRateBps &&
                         (existing.reverseCharge ?: false) == payment.reverseCharge &&
-                        Mapper.fromJsonb<Map<String, String?>>(existing.evidence) == payment.evidence &&
+                        JsonbMapper.fromJsonb<Map<String, String?>>(existing.evidence) == payment.evidence &&
                         existing.paymentTime.toInstant() == payment.paymentTime
 
                 if (!sameEvent) {

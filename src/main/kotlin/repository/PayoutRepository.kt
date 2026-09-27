@@ -1,6 +1,6 @@
 package org.example.repository
 
-import org.example.db.io
+import org.example.api.io
 import org.example.jooq.tables.references.LEDGER_ENTRY
 import org.example.jooq.tables.references.LEDGER_TRANSACTION
 import org.example.jooq.tables.references.MERCHANT_DAILY_BALANCE
@@ -9,9 +9,6 @@ import org.example.model.enums.Currency
 import org.example.model.enums.LedgerTransactionType
 import org.example.model.enums.PaymentPurpose
 import org.example.model.enums.PayoutStatus
-import org.example.payout.DuePayout
-import org.example.payout.MerchantBalance
-import org.example.payout.PayoutStore
 import org.jooq.DSLContext
 import org.jooq.impl.DSL
 import java.time.LocalDate
@@ -19,10 +16,13 @@ import java.time.OffsetDateTime
 import java.time.ZoneOffset
 import java.time.Instant
 import java.util.UUID
-import org.example.Constants
-import org.example.randomUuid
+import org.example.utils.Constants
+import org.example.api.randomUuid
+import org.example.model.MerchantBalance
+import org.example.model.enums.MerchantStatus
+import java.math.BigDecimal
 
-class PayoutRepository(private val dsl: DSLContext) : PayoutStore {
+class PayoutRepository(private val dsl: DSLContext) : PayoutStore, TransferStore {
 
     override suspend fun processingCutoff(endOfDay: Instant): Instant = io {
         dsl.resultQuery(
@@ -61,7 +61,8 @@ class PayoutRepository(private val dsl: DSLContext) : PayoutStore {
             )
             SELECT b.purpose_key::uuid AS merchant_id,
                    COALESCE(m.name, 'unknown merchant') AS merchant_name,
-                   b.amount, b.payment_count
+                   b.amount, b.payment_count,
+                   COALESCE(m.status, 0) <> ${MerchantStatus.ACTIVE.id} AS suspended
             FROM balances b
             LEFT JOIN mor.merchant m ON m.id = b.purpose_key::uuid
             ORDER BY b.purpose_key
@@ -72,8 +73,9 @@ class PayoutRepository(private val dsl: DSLContext) : PayoutStore {
             MerchantBalance(
                 merchantId = row.get("merchant_id", UUID::class.java)!!,
                 merchantName = row.get("merchant_name", String::class.java)!!,
-                amount = row.get("amount", java.math.BigDecimal::class.java)!!,
+                amount = row.get("amount", BigDecimal::class.java)!!,
                 payments = row.get("payment_count", Long::class.java)?.toInt() ?: 0,
+                suspended = row.get("suspended", Boolean::class.java) ?: true,
             )
         }
     }
@@ -230,8 +232,8 @@ class PayoutRepository(private val dsl: DSLContext) : PayoutStore {
         }
     }
 
-    override suspend fun due(status: PayoutStatus, limit: Int): List<DuePayout> = io {
-        if (limit !in 1..1000) return@io emptyList()
+    override suspend fun due(limit: Int): List<DueTransfer> = io {
+        if (limit !in 1..Constants.Jobs.MAX_BATCH_SIZE) return@io emptyList()
 
         dsl.transactionResult { cfg ->
             DSL.using(cfg).resultQuery(
@@ -256,45 +258,42 @@ class PayoutRepository(private val dsl: DSLContext) : PayoutStore {
             JOIN mor.merchant_payment_details d ON d.merchant_id = c.merchant_id
             ORDER BY c.payout_date, c.merchant_id
             """.trimIndent(),
-                status.id, PayoutStatus.PROCESSING.id, limit, PayoutStatus.PROCESSING.id,
+                PayoutStatus.COMPUTED.id, PayoutStatus.PROCESSING.id, limit, PayoutStatus.PROCESSING.id,
             ).fetch().map { row ->
-                DuePayout(
-                    row.get(0, UUID::class.java)!!,
-                    row.get(1, LocalDate::class.java)!!,
-                    row.get(2, String::class.java)!!,
-                    row.get(3, java.math.BigDecimal::class.java)!!,
+                DueTransfer(
+                    kind = TransferKind.PAYOUT,
+                    key = row.get(0, UUID::class.java)!!.toString(),
+                    period = row.get(1, LocalDate::class.java)!!,
+                    destination = row.get(2, String::class.java)!!,
+                    amount = row.get(3, BigDecimal::class.java)!!,
                 )
             }
         }
     }
 
-    override suspend fun markSent(
-        merchantId: UUID,
-        payoutDate: LocalDate,
-        pspReference: String,
-    ): Unit = io {
+    override suspend fun markSent(transfer: DueTransfer, externalReference: String): Unit = io {
         dsl.transaction { cfg ->
             DSL.using(cfg)
                 .update(PAYOUT)
                 .set(PAYOUT.STATUS, PayoutStatus.SENT.id)
-                .set(PAYOUT.PSP_REFERENCE, pspReference)
-                .where(PAYOUT.MERCHANT_ID.eq(merchantId))
-                .and(PAYOUT.PAYOUT_DATE.eq(payoutDate))
-                .and(PAYOUT.STATUS.eq(PayoutStatus.PROCESSING.id))
+                .set(PAYOUT.PSP_REFERENCE, externalReference)
+                .where(claim(transfer))
                 .execute()
         }
     }
 
-    override suspend fun release(merchantId: UUID, payoutDate: LocalDate): Unit = io {
+    override suspend fun release(transfer: DueTransfer): Unit = io {
         dsl.transaction { cfg ->
             DSL.using(cfg).update(PAYOUT)
                 .set(PAYOUT.STATUS, PayoutStatus.COMPUTED.id)
-                .setNull(DSL.field(DSL.name("claimed_at"), java.time.OffsetDateTime::class.java))
-                .where(PAYOUT.MERCHANT_ID.eq(merchantId))
-                .and(PAYOUT.PAYOUT_DATE.eq(payoutDate))
-                .and(PAYOUT.STATUS.eq(PayoutStatus.PROCESSING.id))
+                .setNull(PAYOUT.CLAIMED_AT)
+                .where(claim(transfer))
                 .execute()
         }
     }
 
+    private fun claim(transfer: DueTransfer) =
+        PAYOUT.MERCHANT_ID.eq(UUID.fromString(transfer.key))
+            .and(PAYOUT.PAYOUT_DATE.eq(transfer.period))
+            .and(PAYOUT.STATUS.eq(PayoutStatus.PROCESSING.id))
 }

@@ -6,7 +6,7 @@ import com.fasterxml.jackson.dataformat.yaml.YAMLFactory
 import com.fasterxml.jackson.module.kotlin.readValue
 import com.fasterxml.jackson.module.kotlin.registerKotlinModule
 import java.io.File
-import org.example.Constants.Config.DEFAULT_PATH
+import org.example.utils.Constants.Config.DEFAULT_PATH
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class AppConfig(

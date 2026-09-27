@@ -1,15 +1,11 @@
 #!/usr/bin/env bash
 # Regenerates typed jOOQ classes from the running dev database.
 #
-# jOOQ generates from a LIVE database, not from .sql text. Migrations are
-# applied by the application at startup, so the sequence after adding a
-# migration is:
+# jOOQ generates from a LIVE database, not from .sql text, so the schema has to
+# exist first. ./scripts/rebuild-all.sh does the whole chain; run this alone
+# only when the schema is already current.
 #
-#   docker compose up -d     # postgres
-#   ./gradlew run            # app applies the migration, then Ctrl-C
-#   ./scripts/jooq-generate.sh
-#
-# Generated sources are committed, so a clean clone compiles with no database.
+# src/generated is gitignored, so a clean clone must run this.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."

@@ -11,15 +11,11 @@ import org.example.model.enums.PaymentStatus
 import org.example.model.enums.ProcessingErrorCode
 import org.example.model.enums.TaxCategory
 import org.example.repository.PaymentStore
-import org.example.tax.BasisPoints
-import org.example.tax.TaxCalculator
-import org.example.tax.TaxCountryVote
-import org.example.tax.TaxRates
-import org.example.tax.VatIdRules
+import org.example.repository.BasisPoints
 import org.slf4j.LoggerFactory
 import java.time.Clock
-import org.example.Constants
-import org.example.randomUuid
+import org.example.utils.Constants
+import org.example.api.randomUuid
 
 /**
  * Decides everything WITHOUT touching the database, then writes once.

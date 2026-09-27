@@ -11,7 +11,23 @@ docker info | head -3 # must not say "Cannot connect to the Docker daemon"
 chmod +x scripts/*.sh
 ```
 
-## 1. Postgres
+## 1. Everything at once
+
+```bash
+./scripts/rebuild-all.sh          # API DTOs, empty Postgres, migrations, jOOQ, schema.sql
+./scripts/rebuild-all.sh --test   # ... then ./gradlew test --rerun
+./gradlew run
+```
+
+That is the whole setup. It wipes the dev database volume. The steps below are
+the same chain one script at a time, for when only one part needs redoing.
+
+| flag | effect |
+|---|---|
+| `--keep-db` | skip the reset, keep existing data |
+| `--test` | run the test suite at the end |
+
+## 2. Postgres
 
 ```bash
 ./scripts/db-reset.sh     # empty database on localhost:3333
@@ -29,15 +45,15 @@ Compose runs Postgres only - Flyway is a script, or runs in-process at startup.
 
 Override with `DB_URL`, `DB_USER`, `DB_PASSWORD`, `DB_POOL_SIZE`.
 
-## 2. Generated sources
+## 3. Generated sources
 
 `src/generated` is **not committed** - it is in `.gitignore`. A clean clone
-does not compile until these run, and jOOQ reads the live database, so step 1
+does not compile until these run, and jOOQ reads the live database, so step 2
 has to come first. CI does the same thing on every push
 (`.github/workflows/ci.yml`).
 
 ```bash
-./scripts/jooq-generate.sh   # db/migration -> src/generated/jooq (needs step 1)
+./scripts/jooq-generate.sh   # db/migration -> src/generated/jooq (needs step 2)
 ./scripts/api-generate.sh    # api/definitions.yaml -> src/generated/api
 ./scripts/db-schema.sh       # refreshes db/schema.sql (optional)
 ```
@@ -46,13 +62,13 @@ Re-run `jooq-generate.sh` after changing a migration and `api-generate.sh`
 after changing the API spec. Gradle equivalents: `./gradlew jooqCodegen
 apiCodegen`.
 
-## 3. Run
+## 4. Run
 
 ```bash
 ./gradlew run
 ```
 
-## 4. Merchants
+## 5. Merchants
 
 10 merchants are inserted from `src/main/resources/merchants.json` at startup:
 new ones are created, changed ones updated, matching ones left alone. Use one
@@ -68,7 +84,7 @@ ada07d6c-0000-4000-8000-000000000010   Juniper Books, SUSPENDED
 Blank `mor.merchantSeedResource` to switch it off; in production merchants
 come from the onboarding service.
 
-## 5. Swagger
+## 6. Swagger
 
 With the app running:
 
@@ -125,7 +141,7 @@ curl "localhost:8081/v1/balances/merchants?limit=10"
 The balances endpoints are finance reports, not PSP webhooks, so they take no
 signature.
 
-## 6. Tests
+## 7. Tests
 
 ```bash
 ./gradlew test --rerun
@@ -147,7 +163,7 @@ and pins the Docker API version - see `tasks.test` in `build.gradle.kts`.
 | database tests SKIPPED | same, or the socket path is not in `tasks.test` |
 | `server: IntelliJ IDEA` in a response | IntelliJ's built-in server answered, not this app |
 | `Address already in use` on 8081 | `lsof -i:8081` |
-| `Unresolved reference: jooq` / `dto` at compile time | step 2 was not run in this clone |
+| `Unresolved reference: jooq` / `dto` at compile time | `./scripts/rebuild-all.sh` was not run in this clone |
 
 ## Continuous integration
 

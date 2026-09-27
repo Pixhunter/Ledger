@@ -1,18 +1,13 @@
 package org.example.repository
 
-import org.example.db.io
 import org.example.jooq.tables.references.LEDGER_ENTRY
 import org.example.jooq.tables.references.LEDGER_TRANSACTION
-import org.example.jooq.tables.references.PAYMENT
 import org.example.jooq.tables.references.TAX_DAILY_BALANCE
 import org.example.jooq.tables.references.TAX_REMITTANCE
 import org.example.model.enums.Currency
 import org.example.model.enums.LedgerTransactionType
 import org.example.model.enums.PaymentPurpose
 import org.example.model.enums.PayoutStatus
-import org.example.remittance.DueRemittance
-import org.example.remittance.TaxLiability
-import org.example.remittance.TaxRemittanceStore
 import org.jooq.DSLContext
 import org.jooq.impl.DSL
 import java.math.BigDecimal
@@ -20,10 +15,12 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
-import org.example.Constants
-import org.example.randomUuid
+import org.example.utils.Constants
+import org.example.api.randomUuid
+import org.example.api.io
+import org.example.model.TaxLiability
 
-class TaxRemittanceRepository(private val dsl: DSLContext) : TaxRemittanceStore {
+class TaxRemittanceRepository(private val dsl: DSLContext) : TaxRemittanceStore, TransferStore {
 
     /**
      * Entries are signed: tax owed is a credit, so the liability is the
@@ -185,11 +182,11 @@ class TaxRemittanceRepository(private val dsl: DSLContext) : TaxRemittanceStore 
         }.getOrElse { e -> if (e is AlreadyFiled || e is NothingToFile) null else throw e }
     }
 
-    override suspend fun due(status: PayoutStatus, limit: Int): List<DueRemittance> = io {
-        require(limit in 1..Constants.Jobs.MAX_BATCH_SIZE)
-        dsl.transactionResult { cfg ->
-            DSL.using(cfg).resultQuery(
-                """
+    override suspend fun due(limit: Int): List<DueTransfer> = io {
+        if (limit !in 1..Constants.Jobs.MAX_BATCH_SIZE) return@io emptyList()
+
+        dsl.transactionResult { cfg -> DSL.using(cfg).resultQuery(
+            """
             WITH candidates AS (
                 SELECT country, period_start
                 FROM mor.tax_remittance
@@ -205,41 +202,44 @@ class TaxRemittanceRepository(private val dsl: DSLContext) : TaxRemittanceStore 
             WHERE r.country = c.country AND r.period_start = c.period_start
             RETURNING r.country, r.period_start, r.amount
             """.trimIndent(),
-                status.id, PayoutStatus.PROCESSING.id, limit, PayoutStatus.PROCESSING.id,
-            ).fetch().map { row ->
-                DueRemittance(
-                    row.get(0, String::class.java)!!,
-                    row.get(1, LocalDate::class.java)!!,
-                    row.get(2, BigDecimal::class.java)!!,
-                )
-            }
-        }
+            PayoutStatus.COMPUTED.id, PayoutStatus.PROCESSING.id, limit, PayoutStatus.PROCESSING.id,
+        ).fetch().map { row ->
+            val country = row.get(0, String::class.java)!!
+            DueTransfer(
+                kind = TransferKind.TAX,
+                key = country,
+                period = row.get(1, LocalDate::class.java)!!,
+                destination = country,
+                amount = row.get(2, BigDecimal::class.java)!!,
+            )
+        } }
     }
 
-    override suspend fun markSent(country: String, periodStart: LocalDate, reference: String): Unit = io {
+    override suspend fun markSent(transfer: DueTransfer, externalReference: String): Unit = io {
         dsl.transaction { cfg ->
             DSL.using(cfg)
                 .update(TAX_REMITTANCE)
                 .set(TAX_REMITTANCE.STATUS, PayoutStatus.SENT.id)
-                .set(TAX_REMITTANCE.REFERENCE, reference)
-                .where(TAX_REMITTANCE.COUNTRY.eq(country))
-                .and(TAX_REMITTANCE.PERIOD_START.eq(periodStart))
-                .and(TAX_REMITTANCE.STATUS.eq(PayoutStatus.PROCESSING.id))
+                .set(TAX_REMITTANCE.REFERENCE, externalReference)
+                .where(claim(transfer))
                 .execute()
         }
     }
 
-    override suspend fun release(country: String, periodStart: LocalDate): Unit = io {
+    override suspend fun release(transfer: DueTransfer): Unit = io {
         dsl.transaction { cfg ->
             DSL.using(cfg).update(TAX_REMITTANCE)
                 .set(TAX_REMITTANCE.STATUS, PayoutStatus.COMPUTED.id)
-                .setNull(DSL.field(DSL.name("claimed_at"), java.time.OffsetDateTime::class.java))
-                .where(TAX_REMITTANCE.COUNTRY.eq(country))
-                .and(TAX_REMITTANCE.PERIOD_START.eq(periodStart))
-                .and(TAX_REMITTANCE.STATUS.eq(PayoutStatus.PROCESSING.id))
+                .setNull(TAX_REMITTANCE.CLAIMED_AT)
+                .where(claim(transfer))
                 .execute()
         }
     }
+
+    private fun claim(transfer: DueTransfer) =
+        TAX_REMITTANCE.COUNTRY.eq(transfer.key)
+            .and(TAX_REMITTANCE.PERIOD_START.eq(transfer.period))
+            .and(TAX_REMITTANCE.STATUS.eq(PayoutStatus.PROCESSING.id))
 
     private class AlreadyFiled : RuntimeException()
 

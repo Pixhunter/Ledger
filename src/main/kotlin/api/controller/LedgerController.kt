@@ -1,28 +1,36 @@
 package org.example.api.controller
 
 import io.ktor.http.HttpStatusCode
-import org.example.api.ApiResponse
+import io.ktor.server.request.receiveText
+import io.ktor.server.response.respond
+import io.ktor.server.routing.Route
+import io.ktor.server.routing.RoutingContext
+import io.ktor.server.routing.post
+import org.example.api.DtoMapper.recorded
+import org.example.api.DtoMapper.rejected
+import org.example.api.DtoMapper.toModel
 import org.example.api.apiJson
 import org.example.api.generated.model.ErrorReasonDto
-import org.example.api.generated.model.LedgerResponseDto
 import org.example.api.generated.model.PaymentRequestDto
 import org.example.api.generated.model.RefundRequestDto
-import org.example.api.mapper.PaymentMapper.toModel
-import org.example.api.mapper.RefundMapper.toModel
-import org.example.api.recorded
-import org.example.api.rejected
 import org.example.api.security.PspSignature
 import org.example.model.ProcessingError
-import org.example.model.RejectReason
 import org.example.model.enums.EventType
+import org.example.api.randomUuid
 import org.example.repository.ProcessingErrorStore
 import org.example.service.LedgerError
 import org.example.service.LedgerResult
 import org.example.service.PaymentService
 import org.example.service.RefundService
 import org.slf4j.LoggerFactory
-import org.example.randomUuid
 
+/**
+ * The PSP-facing half of the production API: verify the signature, parse, hand
+ * to the service, turn the one [LedgerResult] into a status and a body.
+ *
+ * It owns its own routes, so there is no separate routing layer forwarding
+ * strings into it. The dev API is a second surface, in DevRoutes.
+ */
 class LedgerController(
     private val payments: PaymentService,
     private val refunds: RefundService,
@@ -31,59 +39,61 @@ class LedgerController(
 ) {
     private val log = LoggerFactory.getLogger(LedgerController::class.java)
 
-    suspend fun createPayment(rawBody: String, signatureHeader: String?): ApiResponse<LedgerResponseDto> {
-        if (!signature.verify(rawBody.toByteArray(), signatureHeader)) {
-            log.warn("rejected unsigned payment request")
-            return failed(HttpStatusCode.Unauthorized)
+    fun routes(route: Route) = with(route) {
+        post("/v1/payment/capture") {
+            handle(EventType.CAPTURE) { raw ->
+                val request = apiJson.decodeFromString<PaymentRequestDto>(raw).toModel()
+                log.info("payment psp={} merchant={}", request.pspReference, request.merchantId)
+                payments.createPayment(request, raw)
+            }
         }
 
-        val request = parse(rawBody) { apiJson.decodeFromString<PaymentRequestDto>(it).toModel() }
-            ?: return failed(HttpStatusCode.BadRequest)
-
-        log.info("payment psp={} merchant={}", request.pspReference, request.merchantId)
-
-        return answer(payments.createPayment(request, rawBody), EventType.CAPTURE, rawBody)
+        post("/v1/payment/refund") {
+            handle(EventType.REFUND) { raw ->
+                val request = apiJson.decodeFromString<RefundRequestDto>(raw).toModel()
+                log.info("refund psp={} refund={}", request.pspReference, request.refundReference)
+                refunds.createRefund(request, raw)
+            }
+        }
     }
 
-    suspend fun createRefund(rawBody: String, signatureHeader: String?): ApiResponse<LedgerResponseDto> {
-        if (!signature.verify(rawBody.toByteArray(), signatureHeader)) {
-            log.warn("rejected unsigned refund request")
-            return failed(HttpStatusCode.Unauthorized)
+    /** Signature, parse, run, answer - identical for both money events. */
+    private suspend fun RoutingContext.handle(
+        eventType: EventType,
+        book: suspend (rawBody: String) -> LedgerResult,
+    ) {
+        val rawBody = call.receiveText()
+
+        if (!signature.verify(rawBody.toByteArray(), call.request.headers[PspSignature.HEADER])) {
+            log.warn("rejected unsigned {} request", eventType)
+            return call.respond(HttpStatusCode.Unauthorized, rejected(ErrorReasonDto.INVALID_REQUEST))
         }
 
-        val request = parse(rawBody) { apiJson.decodeFromString<RefundRequestDto>(it).toModel() }
-            ?: return failed(HttpStatusCode.BadRequest)
-
-        log.info("refund psp={} refund={}", request.pspReference, request.refundReference)
-
-        return answer(refunds.createRefund(request, rawBody), EventType.REFUND, rawBody)
-    }
-
-    private fun <T> parse(rawBody: String, decode: (String) -> T): T? {
-        return runCatching { decode(rawBody) }.getOrElse { e ->
+        val result = runCatching { book(rawBody) }.getOrElse { e ->
             log.warn("bad request: {}", e.message)
-            null
+            return call.respond(HttpStatusCode.BadRequest, rejected(ErrorReasonDto.INVALID_REQUEST))
         }
+
+        answer(result, eventType, rawBody)
     }
 
-    private suspend fun answer(
+    private suspend fun RoutingContext.answer(
         result: LedgerResult,
         eventType: EventType,
         rawBody: String,
-    ): ApiResponse<LedgerResponseDto> = when (result) {
+    ) = when (result) {
         // Recorded errors are persisted atomically with their money event by
         // the repository. Recording them again here would split that guarantee.
-        is LedgerResult.Recorded -> ApiResponse(HttpStatusCode.OK, recorded())
-
+        is LedgerResult.Recorded,
         is LedgerResult.Duplicate,
-        is LedgerResult.NothingToRecord -> ApiResponse(HttpStatusCode.OK, recorded())
+        is LedgerResult.NothingToRecord -> call.respond(HttpStatusCode.OK, recorded())
 
-        is LedgerResult.PaymentNotFound -> failed(HttpStatusCode.NotFound)
-        is LedgerResult.Rejected -> failed(HttpStatusCode.BadRequest, result.reason)
+        is LedgerResult.PaymentNotFound ->
+            call.respond(HttpStatusCode.NotFound, rejected(ErrorReasonDto.INVALID_REQUEST))
 
         is LedgerResult.NotBookable -> {
             record(result.error, eventType, rawBody)
-            ApiResponse(HttpStatusCode.OK, recorded())
+            call.respond(HttpStatusCode.OK, recorded())
         }
     }
 
@@ -99,13 +109,4 @@ class LedgerController(
                 detail = error.detail,
             )
         )
-
-    private fun failed(
-        status: HttpStatusCode,
-        reason: RejectReason = RejectReason.INVALID_REQUEST,
-    ) = ApiResponse(status, rejected(reason.toDto()))
-
-    private fun RejectReason.toDto(): ErrorReasonDto = when (this) {
-        RejectReason.INVALID_REQUEST -> ErrorReasonDto.INVALID_REQUEST
-    }
 }

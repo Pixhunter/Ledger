@@ -1,18 +1,17 @@
 package org.example.repository
 
-import org.example.db.Mapper
-import org.example.db.io
+import org.example.database.JsonbMapper
 import org.example.jooq.tables.references.MERCHANT
 import org.example.jooq.tables.references.MERCHANT_PAYMENT_DETAILS
-import org.example.merchant.MerchantSeed
-import org.example.merchant.MerchantSeedStore
+import org.example.model.MerchantSeed
 import org.example.model.enums.MerchantStatus
 import org.example.service.MerchantRegistry
+import org.example.api.io
 import org.jooq.DSLContext
 import org.jooq.impl.DSL
 import java.util.UUID
 
-class MerchantRepository(private val dsl: DSLContext) : MerchantSeedStore, MerchantRegistry {
+class MerchantRepository(private val dsl: DSLContext) : MerchantRegistry {
 
     override suspend fun exists(merchantId: UUID): Boolean = io {
         dsl.fetchExists(
@@ -22,7 +21,8 @@ class MerchantRepository(private val dsl: DSLContext) : MerchantSeedStore, Merch
         )
     }
 
-    override suspend fun upsert(seed: MerchantSeed): Boolean = io {
+    /** True when the row was inserted or actually changed. */
+    suspend fun upsert(seed: MerchantSeed): Boolean = io {
         dsl.transactionResult { cfg ->
             val db = DSL.using(cfg)
 
@@ -60,7 +60,7 @@ class MerchantRepository(private val dsl: DSLContext) : MerchantSeedStore, Merch
                 .set(MERCHANT_PAYMENT_DETAILS.ACCOUNT_NUMBER, details.accountNumber)
                 .set(MERCHANT_PAYMENT_DETAILS.ROUTING_CODE, details.routingCode)
                 .set(MERCHANT_PAYMENT_DETAILS.BANK_COUNTRY, details.bankCountry)
-                .set(MERCHANT_PAYMENT_DETAILS.ADDRESS, Mapper.toJsonb(details.address))
+                .set(MERCHANT_PAYMENT_DETAILS.ADDRESS, JsonbMapper.toJsonb(details.address))
                 .onConflict(MERCHANT_PAYMENT_DETAILS.MERCHANT_ID)
                 .doUpdate()
                 .set(MERCHANT_PAYMENT_DETAILS.PSP_ACCOUNT_ID, details.pspAccountId)
@@ -70,7 +70,7 @@ class MerchantRepository(private val dsl: DSLContext) : MerchantSeedStore, Merch
                 .set(MERCHANT_PAYMENT_DETAILS.ACCOUNT_NUMBER, details.accountNumber)
                 .set(MERCHANT_PAYMENT_DETAILS.ROUTING_CODE, details.routingCode)
                 .set(MERCHANT_PAYMENT_DETAILS.BANK_COUNTRY, details.bankCountry)
-                .set(MERCHANT_PAYMENT_DETAILS.ADDRESS, Mapper.toJsonb(details.address))
+                .set(MERCHANT_PAYMENT_DETAILS.ADDRESS, JsonbMapper.toJsonb(details.address))
                 .set(MERCHANT_PAYMENT_DETAILS.UPDATED_AT, DSL.currentOffsetDateTime())
                 .where(
                     MERCHANT_PAYMENT_DETAILS.PSP_ACCOUNT_ID.ne(details.pspAccountId)
