@@ -10,8 +10,10 @@ import org.example.model.PaymentModel
 import org.example.model.enums.PaymentStatus
 import org.example.model.enums.ProcessingErrorCode
 import org.example.model.enums.TaxCategory
-import org.example.repository.PaymentStore
-import org.example.repository.BasisPoints
+import repository.store.PaymentStore
+import model.BasisPoints
+import model.LedgerError
+import model.LedgerResult
 import java.time.Clock
 import org.example.utils.Constants
 import org.example.api.randomUuid
@@ -50,9 +52,10 @@ class PaymentService(
         //      same reference can arrive FAILED then SUCCESS, and a stored FAILED row would
         //      swallow the success.
         if (!request.success) {
-            log.info("outcome=psp_failed nothing stored")
+            log.info("Psp_failed nothing stored")
             return LedgerResult.NothingToRecord
         }
+        log.info("Create new payment")
 
         val evidence = mapOf(
             "billing" to request.billingCountry,
@@ -126,7 +129,7 @@ class PaymentService(
         if (request.paymentTime.isBefore(now.minus(Constants.Dates.PAYMENT_MAX_DRIFT)) ||
             request.paymentTime.isAfter(now.plus(Constants.Dates.PAYMENT_MAX_DRIFT))
         ) {
-            log.warn("event=invalid_date paymentTime={} receivedAt={} maxDrift={}", request.paymentTime, now, Constants.Dates.PAYMENT_MAX_DRIFT)
+            log.warn("Invalid date for paymentTime=${ request.paymentTime} receivedAt=$now maxDrift=${Constants.Dates.PAYMENT_MAX_DRIFT}" )
             errors += LedgerError(
                 ProcessingErrorCode.INVALID_DATE,
                 request.pspReference,
@@ -134,7 +137,7 @@ class PaymentService(
             )
         }
         if (invalidVatId) {
-            log.warn("event=invalid_vat_id country={}", taxCountry)
+            log.warn("Invalid vat id for country=$taxCountry")
             errors += LedgerError(
                 ProcessingErrorCode.INVALID_VAT_ID,
                 request.pspReference,

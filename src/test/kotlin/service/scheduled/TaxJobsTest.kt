@@ -5,8 +5,8 @@ import org.example.model.ProcessingError
 import org.example.model.TaxLiability
 import org.example.model.enums.EventType
 import org.example.model.enums.ProcessingErrorCode
-import org.example.repository.ProcessingErrorStore
-import org.example.repository.TaxRemittanceStore
+import repository.store.ProcessingErrorStore
+import repository.store.TaxRemittanceStore
 import java.math.BigDecimal
 import java.time.LocalDate
 import kotlin.test.Test

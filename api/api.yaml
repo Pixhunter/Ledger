@@ -16,9 +16,10 @@ servers:
 paths:
   /v1/payment/capture:
     post:
+      tags: [ Tap to pay ]
       summary: PSP reports a payment
       description: |
-        Money is already taken from the customer by the PSP.
+        Money is already taken from the customer by the PSP. The Mor save them.
       operationId: createPayment
       requestBody:
         required: true
@@ -56,14 +57,15 @@ paths:
               example:
                 status: FAILED
                 reason: INVALID_REQUEST
+        '500':
+          description: Internal failure. Nothing was recorded; the sender should retry.
 
   /v1/payment/refund:
     post:
+      tags: [ Tap to refund ]
       summary: PSP reports a refund
       description: |
-        The money has already left: approval happened earlier, in the refund
-        service, and the PSP has paid the customer back. The ledger records the
-        refund and never declines it.
+        The ledger records the refund and never declines it.
       operationId: createRefund
       requestBody:
         required: true
@@ -97,36 +99,30 @@ paths:
               example:
                 status: FAILED
                 reason: INVALID_REQUEST
+        '500':
+          description: Internal failure. Nothing was recorded; the sender should retry.
 
   /v1/balances/tax:
     get:
-      tags: [ balances ]
+      tags: [ Tap to look at the balances ]
       summary: What one country's tax authority is owed
       description: |
         Sums the country's TAX account in the ledger.
 
-        Without `from` and `to` it answers "what do we owe right now". With
-        them it answers a filing period: the balance at the start, the movement
-        inside the window, and the balance at the end. Movement is what a VAT
-        return is built from - sales add to it, refunds take away, a remittance
-        clears it.
+        Without `from` and `to` it answers "what do we owe right now".
+        With them it answers a filing period: the balance at the start, the movement
+        inside the window, and the balance at the end. 
 
-        The window is on the tax point (`paymentTime`, `refundedAt`), not on
-        when the row was written, so a sale on 31 August belongs to August even
-        if the webhook arrived in September.
-
-        One country per call. Several would be a list parameter, and the query
-        is already keyed that way - left out until there are enough countries
-        for it to matter.
+        One country per call.
       operationId: taxBalance
-      security: []
+      security: [ ]
       parameters:
         - name: country
           in: query
           required: true
           schema:
             $ref: './definitions.yaml#/components/schemas/Country'
-          example: ES
+          example: DE
         - name: from
           in: query
           required: false
@@ -151,7 +147,7 @@ paths:
               schema:
                 $ref: './definitions.yaml#/components/schemas/TaxBalance'
               example:
-                country: ES
+                country: DE
                 currency: EUR
                 from: '2026-09-01T00:00:00Z'
                 to: '2026-10-01T00:00:00Z'
@@ -174,23 +170,18 @@ paths:
       summary: What merchants are owed
       description: |
         Current balance per merchant: `available` is payable on the next payout
-        run, `held` is recorded but frozen and never paid out.
+        run (until that - nothing). 
+        
+        The job for calculating merchant balance run each day, but you can call `/v1/payouts/compute` 
+        to process them imitatively
 
-        Repeat `merchantId` to ask for several, at most 100 per call.
-        Omitting it walks every merchant with a balance, one keyset page at a
-        time: pages are ordered by merchant id, capped by `limit`, and
-        continued by passing the response's `nextCursor` back as `after`.
+        Add correct `merchantId` to see the data. Repeat `merchantId` to ask for several, at most 100 per call.
 
         Without `date` the answer is the live balance summed from the ledger up
-        to `asOf` (default now). Entries dated later are excluded: the PSP may
-        date a capture into the future, and the payout job withholds it until
-        its tax point passes, so the balance must too.
-        With `date` it is that day's close, read from the nightly snapshot -
-        one indexed row, and the number the payout job actually acted on. The
-        snapshot has no row for a day the close job did not run, and it records
-        the merchant balance only, so `held` is absent for a past date.
+        to `asOf` (default now). 
+        With `date` it is that day's close, read from the nightly snapsho.
       operationId: merchantBalances
-      security: []
+      security: [ ]
       parameters:
         - name: merchantId
           in: query
@@ -250,7 +241,7 @@ paths:
                 nextCursor: null
                 merchants:
                   - merchantId: 1a1e7d6c-0000-4000-8000-000000000001
-                    merchantName: Aurora SaaS
+                    merchantName: Memniy korol inc.
                     available: '95.00'
                     held: '0.00'
         '400':
@@ -273,4 +264,4 @@ components:
       name: X-Psp-Signature
 
 security:
-  - PspSignature: []
+  - PspSignature: [ ]

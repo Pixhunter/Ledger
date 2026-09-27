@@ -1,7 +1,7 @@
 package org.example.service.scheduled
 
 import org.example.model.TaxLiability
-import org.example.repository.TaxRemittanceStore
+import repository.store.TaxRemittanceStore
 import java.time.LocalDate
 import java.time.ZoneId
 import org.example.utils.Constants

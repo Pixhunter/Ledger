@@ -1,9 +1,11 @@
 package org.example.service.scheduled
 
-import org.example.repository.TransferClient
-import org.example.repository.TransferKind
-import org.example.repository.TransferResult
-import org.example.repository.TransferStore
+import model.DueTransfer
+import model.TransferClient
+import model.TransferKind
+import model.TransferResult
+import model.TransferStore
+import org.example.utils.Constants
 import org.example.utils.logger
 
 /**
@@ -18,27 +20,50 @@ class DisbursementJob(
     private val kind: TransferKind,
     private val transfers: TransferStore,
     private val client: TransferClient,
+    private val batchSize: Int = Constants.Jobs.CLAIM_LIMIT,
+    private val maxBatches: Int = Constants.Jobs.MAX_DISBURSEMENT_BATCHES,
 ) {
     private val log = logger<DisbursementJob>()
 
     suspend fun run(): Int {
+        log.info("Send all calculations")
+
+        require(batchSize in 1..Constants.Jobs.MAX_BATCH_SIZE)
+        require(maxBatches > 0)
+
         var sent = 0
+        var batches = 0
+        val failed = mutableListOf<DueTransfer>()
 
-        transfers.due().forEach { transfer ->
-            when (val result = client.send(transfer)) {
-                is TransferResult.Accepted -> {
-                    transfers.markSent(transfer, result.reference)
-                    sent++
-                }
+        try {
+            while (batches < maxBatches) {
+                val due = transfers.due(batchSize)
+                if (due.isEmpty()) break
+                batches++
 
-                is TransferResult.Failed -> {
-                    transfers.release(transfer)
-                    log.error("event=transfer outcome=rejected ref={} reason={}", transfer.reference, result.reason)
+                due.forEach { transfer ->
+                    when (val result = client.send(transfer)) {
+                        is TransferResult.Accepted -> {
+                            transfers.markSent(transfer, result.reference)
+                            sent++
+                        }
+
+                        is TransferResult.Failed -> {
+                            failed += transfer
+                            log.error("Transfer outcome rejected ref=${transfer.reference} reason=${result.reason}")
+                        }
+                    }
                 }
             }
+        } finally {
+            failed.forEach { transfers.release(it) }
         }
 
-        log.info("event=disbursement kind={} sent={}", kind.reference, sent)
+        if (batches == maxBatches) {
+            log.warn("Batches equal to maxBatches: $maxBatches")
+        }
+
+        log.info("Disbursement kind=${kind.reference} sent=$sent batches=$batches")
         return sent
     }
 }

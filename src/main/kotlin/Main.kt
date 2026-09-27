@@ -7,7 +7,7 @@ import org.example.database.Database
 import kotlinx.coroutines.runBlocking
 import org.example.bootstrap.ledgerModule
 import org.example.database.Migrations
-import org.example.bootstrap.MerchantSeeder
+import org.example.bootstrap.MerchantLoader
 import org.example.repository.MerchantRepository
 import org.example.utils.logger
 
@@ -18,8 +18,7 @@ fun main() {
     val config = AppConfig.load()
     // The JDBC url is not logged: it carries credentials. GDPR Art. 32.
     log.info(
-        "event=startup host={} port={} db={}",
-        config.server.host, config.server.port, config.database.url.substringAfterLast('/'),
+        "Startup host=${config.server.host} port=${config.server.port} db=${config.database.url.substringAfterLast('/')}"
     )
 
     val dataSource = Database.dataSource(config.database)
@@ -29,7 +28,7 @@ fun main() {
 
     config.mor.merchantSeedResource
         ?.takeIf { it.isNotBlank() }
-        ?.let { runBlocking { MerchantSeeder(MerchantRepository(dsl), it).run() } }
+        ?.let { runBlocking { MerchantLoader(MerchantRepository(dsl), it).run() } }
 
     embeddedServer(Netty, host = config.server.host, port = config.server.port) {
         ledgerModule(config, dsl)

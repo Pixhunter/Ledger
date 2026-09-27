@@ -15,7 +15,7 @@ import org.example.jooq.tables.references.PAYMENT
 import org.example.jooq.tables.references.PAYMENT_HOLD
 import org.example.jooq.tables.references.REFUND
 import org.example.api.security.PspSignature
-import org.example.model.enumById
+import model.enums.enumById
 import org.example.model.enums.PaymentPurpose
 import org.example.model.enums.TaxCategory
 import org.jooq.JSONB

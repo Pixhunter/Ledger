@@ -1,4 +1,4 @@
-package org.example.model
+package model.enums
 
 interface IdKey<TYPE> {
     val id: TYPE

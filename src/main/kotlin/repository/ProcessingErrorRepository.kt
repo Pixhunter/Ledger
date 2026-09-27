@@ -7,6 +7,7 @@ import org.jooq.DSLContext
 import org.jooq.JSONB
 import org.jooq.impl.DSL
 import org.example.utils.logger
+import repository.store.ProcessingErrorStore
 
 class ProcessingErrorRepository(private val dsl: DSLContext) : ProcessingErrorStore {
 
@@ -16,16 +17,14 @@ class ProcessingErrorRepository(private val dsl: DSLContext) : ProcessingErrorSt
 
     override suspend fun saveAll(errors: List<ProcessingError>): Unit = io {
         if (errors.isEmpty()) return@io
+        log.info("Start to save ${errors.size} errors")
 
         val stored = dsl.transactionResult { cfg ->
             insertProcessingErrors(DSL.using(cfg), errors)
         }
 
         if (stored > 0) {
-            log.warn(
-                "event=quarantine stored={} codes={}",
-                stored, errors.map { it.code }.distinct(),
-            )
+            log.warn("Successfully stored $stored errors: codes=${errors.map { it.code }.distinct()}")
         }
     }
 }

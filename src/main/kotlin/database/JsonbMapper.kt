@@ -6,13 +6,6 @@ import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import org.jooq.JSONB
 
-/**
- * One ObjectMapper for everything stored in a jsonb column. Built once:
- * thread-safe but expensive to create.
- *
- * FAIL_ON_UNKNOWN_PROPERTIES is off on purpose - rows outlive deployments, so
- * json written by an older build must still deserialise after a field is added.
- */
 object JsonbMapper {
 
     val mapper: ObjectMapper = jacksonObjectMapper()

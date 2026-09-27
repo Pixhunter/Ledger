@@ -12,7 +12,7 @@ import org.example.jooq.tables.references.REFUND
 import org.example.jooq.tables.references.PROCESSING_ERROR
 import org.example.bootstrap.ledgerModule
 import org.example.service.InMemoryMerchantRegistry
-import org.example.model.enumById
+import model.enums.enumById
 import org.example.model.enums.HoldReason
 import org.example.model.enums.LedgerTransactionType
 import org.example.model.enums.PaymentPurpose

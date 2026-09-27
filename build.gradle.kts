@@ -54,6 +54,7 @@ dependencies {
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:$coroutinesVersion")
     implementation("ch.qos.logback:logback-classic:1.5.18")
+    compileOnly("org.jetbrains:annotations:26.0.2")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-slf4j:$coroutinesVersion")
 
     testImplementation(kotlin("test"))
@@ -68,8 +69,8 @@ dependencies {
     openApiGenerator("org.openapitools:openapi-generator-cli:$openApiGeneratorVersion")
 }
 
-// src/generated is gitignored: a clean clone must run ./scripts/jooq-generate.sh
-// (needs a migrated database) and ./scripts/api-generate.sh before compiling.
+// Generated sources are committed so a clean clone and Docker build compile
+// without a code-generation database. CI regenerates them to catch drift.
 sourceSets["main"].java.srcDir("src/generated/jooq")
 sourceSets["main"].java.srcDir("src/generated/api")
 

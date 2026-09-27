@@ -11,13 +11,14 @@ import kotlinx.serialization.json.jsonPrimitive
 import org.example.jooq.tables.references.LEDGER_ENTRY
 import org.example.jooq.tables.references.LEDGER_TRANSACTION
 import org.example.jooq.tables.references.MERCHANT_DAILY_BALANCE
+import org.example.jooq.tables.references.MERCHANT
 import org.example.jooq.tables.references.PAYOUT
 import org.example.jooq.tables.references.PAYMENT
 import org.example.jooq.tables.references.PAYMENT_HOLD
 import org.example.jooq.tables.references.PROCESSING_ERROR
 import org.example.jooq.tables.references.TAX_REMITTANCE
 import org.example.bootstrap.ledgerModule
-import org.example.model.enumById
+import model.enums.enumById
 import org.example.model.enums.PaymentPurpose
 import org.example.model.enums.LedgerTransactionType
 import org.example.model.enums.PayoutStatus
@@ -34,7 +35,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import org.example.api.randomUuid
-import org.example.repository.TransferKind
+import model.TransferKind
 import org.example.support.RecordingTransferClient
 import org.example.model.enums.MerchantStatus
 import org.example.api.controller.LedgerApiIntegrationTestSupport
@@ -116,6 +117,66 @@ class PayoutAndTaxIntegrationTest : LedgerApiIntegrationTestSupport() {
             assertEquals(0, runBlocking { DisbursementJob(TransferKind.PAYOUT, payoutStore, psp).run() })
             assertEquals(1, dsl.fetchCount(PAYOUT))
         }
+
+    @Test
+    fun `payment arriving after balance read is included in payout amount when settled`() = testApplication {
+        application { ledgerModule(testConfig(), dsl, InMemoryMerchantRegistry(setOf(merchantId))) }
+        seedMerchant()
+
+        assertEquals(
+            HttpStatusCode.OK,
+            send(PAYMENT_CAPTURE_ENDPOINT, paymentBody(pspReference = "before-balance-read")).status,
+        )
+
+        val cutoff = Instant.now().plusSeconds(60)
+        val staleBalances = runBlocking { payoutStore.balancePage(null, 100, cutoff) }
+        assertEquals(money("95.00"), staleBalances.single().amount)
+
+        assertEquals(
+            HttpStatusCode.OK,
+            send(PAYMENT_CAPTURE_ENDPOINT, paymentBody(pspReference = "after-balance-read")).status,
+        )
+
+        val computed = runBlocking { payoutStore.computePayouts(staleBalances, payoutDate, cutoff) }
+
+        assertEquals(money("190.00"), computed.single().amount)
+        assertEquals(money("190.00"), dsl.selectFrom(PAYOUT).fetchSingle().amount)
+        assertEquals(money("0.00"), entries().balance(PaymentPurpose.MERCHANT))
+    }
+
+    @Test
+    fun `payout without payment details is not claimed`() {
+        val transactionId = randomUuid()
+        dsl.transaction { cfg ->
+            val db = org.jooq.impl.DSL.using(cfg)
+            db.insertInto(MERCHANT)
+                .set(MERCHANT.ID, merchantId)
+                .set(MERCHANT.NAME, "Merchant without payment details")
+                .set(MERCHANT.CURRENCY, "EUR")
+                .set(MERCHANT.FEE_RATE_BPS, 500)
+                .set(MERCHANT.TAX_CATEGORY, 1.toShort())
+                .set(MERCHANT.STATUS, MerchantStatus.ACTIVE.id)
+                .execute()
+            db.insertInto(LEDGER_TRANSACTION)
+                .set(LEDGER_TRANSACTION.ID, transactionId)
+                .set(LEDGER_TRANSACTION.TYPE, LedgerTransactionType.PAYOUT.id)
+                .execute()
+            db.insertInto(PAYOUT)
+                .set(PAYOUT.MERCHANT_ID, merchantId)
+                .set(PAYOUT.PAYOUT_DATE, payoutDate)
+                .set(PAYOUT.AMOUNT, money("95.00"))
+                .set(PAYOUT.CURRENCY, "EUR")
+                .set(PAYOUT.LEDGER_TRANSACTION_ID, transactionId)
+                .set(PAYOUT.STATUS, PayoutStatus.COMPUTED.id)
+                .execute()
+        }
+
+        val claimed = runBlocking { payoutStore.due() }
+        assertTrue(claimed.none { it.key == merchantId.toString() }, "claimed=$claimed")
+        val payout = dsl.selectFrom(PAYOUT).fetchSingle()
+        assertEquals(PayoutStatus.COMPUTED, enumById<PayoutStatus>(payout.status))
+        assertEquals(null, payout.claimedAt)
+    }
 
     @Test
     fun `captures in three countries are filed and paid per country`() = testApplication {

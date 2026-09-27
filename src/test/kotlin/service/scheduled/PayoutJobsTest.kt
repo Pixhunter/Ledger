@@ -4,8 +4,8 @@ import kotlinx.coroutines.runBlocking
 import org.example.model.ProcessingError
 import org.example.model.enums.EventType
 import org.example.model.enums.ProcessingErrorCode
-import org.example.repository.PayoutStore
-import org.example.repository.ProcessingErrorStore
+import repository.store.PayoutStore
+import repository.store.ProcessingErrorStore
 import java.math.BigDecimal
 import java.time.LocalDate
 import java.time.Instant

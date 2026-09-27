@@ -1,0 +1,13 @@
+.git
+.github
+.gradle
+.idea
+.kotlin
+build
+load-test
+load-test-results
+shelved
+Claude outputs
+*.iml
+*.log
+.DS_Store

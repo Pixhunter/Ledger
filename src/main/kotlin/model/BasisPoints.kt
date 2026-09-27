@@ -1,4 +1,4 @@
-package org.example.repository
+package model
 
 /**
  * Basis points, not percent: integer percent cannot express a 5.5% VAT or a
@@ -8,6 +8,7 @@ package org.example.repository
 @JvmInline
 value class BasisPoints(val value: Int) {
     init {
+        // 10000 == 100%
         require(value in 0..10_000) { "basis points must be 0..10_000, was $value" }
     }
 

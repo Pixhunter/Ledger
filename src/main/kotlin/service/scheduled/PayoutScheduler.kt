@@ -32,8 +32,11 @@ class PayoutScheduler(
     private val log = logger<PayoutScheduler>()
 
     fun start(scope: CoroutineScope) {
+        log.info("Scheduling payout")
+
         scope.daily(Constants.Jobs.PAYOUT_CALCULATION_AT) {
             val businessDate = ZonedDateTime.now(zone).toLocalDate().minusDays(1)
+            calculation.run(businessDate)
         }
 
         scope.daily(Constants.Jobs.PAYOUT_DISBURSEMENT_AT) { disbursement.run() }

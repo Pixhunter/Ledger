@@ -1,5 +1,8 @@
 package org.example.repository
 
+import model.DueTransfer
+import model.TransferKind
+import model.TransferStore
 import org.example.api.io
 import org.example.jooq.tables.references.LEDGER_ENTRY
 import org.example.jooq.tables.references.LEDGER_TRANSACTION
@@ -20,31 +23,43 @@ import org.example.utils.Constants
 import org.example.api.randomUuid
 import org.example.model.MerchantBalance
 import org.example.model.enums.MerchantStatus
+import org.example.utils.logger
 import java.math.BigDecimal
 import org.example.utils.sensitive
+import repository.store.PayoutStore
 
 class PayoutRepository(private val dsl: DSLContext) : PayoutStore, TransferStore {
+    private val log = logger<PayoutRepository>()
 
     override suspend fun processingCutoff(endOfDay: Instant): Instant = io {
+        log.info("Make the time to be cut for payout calculation")
+
         dsl.resultQuery(
             "SELECT least(CAST(? AS timestamptz), clock_timestamp())",
             endOfDay.atOffset(ZoneOffset.UTC),
-        ).fetchSingle(0, java.time.OffsetDateTime::class.java)!!.toInstant()
+        ).fetchSingle(0, OffsetDateTime::class.java)!!.toInstant()
     }
 
     override suspend fun balancePage(afterMerchantId: UUID?, limit: Int, cutoff: Instant): List<MerchantBalance> = io {
-        if (limit <= 0) return@io emptyList()
+        log.info("Start balance for $afterMerchantId")
+        if (limit <= 0) {
+            log.info("Limit $limit <= 0 - skipping payout")
+            return@io emptyList()
+        }
 
         val cursorCondition = if (afterMerchantId == null) "" else "AND purpose_key > ?"
+
         val bindings = buildList<Any> {
             add(PaymentPurpose.MERCHANT.id)
             add(Currency.EUR.name)
             add(cutoff.atOffset(ZoneOffset.UTC))
             add(cutoff.atOffset(ZoneOffset.UTC))
+            add(cutoff.atOffset(ZoneOffset.UTC))
             afterMerchantId?.let { add(it.toString()) }
             add(limit)
         }
-        dsl.resultQuery(
+
+        val result = dsl.resultQuery(
             """
             WITH balances AS (
                 SELECT le.purpose_key, -sum(le.amount) AS amount,
@@ -56,6 +71,7 @@ class PayoutRepository(private val dsl: DSLContext) : PayoutStore, TransferStore
                   AND le.settled_by_transaction_id IS NULL
                   AND lt.type <> ${LedgerTransactionType.PAYOUT.id}
                   AND lt.created_at < CAST(? AS timestamptz)
+                  AND le.occurred_at < CAST(? AS timestamptz)
                   AND (p.payment_time IS NULL OR p.payment_time < CAST(? AS timestamptz))
                   $cursorCondition
                 GROUP BY le.purpose_key
@@ -70,22 +86,30 @@ class PayoutRepository(private val dsl: DSLContext) : PayoutStore, TransferStore
             LIMIT ?
             """.trimIndent(),
             *bindings.toTypedArray(),
-        ).fetch().map { row ->
-            MerchantBalance(
-                merchantId = row.get("merchant_id", UUID::class.java)!!,
-                merchantName = row.get("merchant_name", String::class.java)!!,
-                amount = row.get("amount", BigDecimal::class.java)!!,
-                payments = row.get("payment_count", Long::class.java)?.toInt() ?: 0,
-                suspended = row.get("suspended", Boolean::class.java) ?: true,
-            )
-        }
+        )
+            .fetch()
+            .map { row ->
+                MerchantBalance(
+                    merchantId = row.get("merchant_id", UUID::class.java)!!,
+                    merchantName = row.get("merchant_name", String::class.java)!!,
+                    amount = row.get("amount", BigDecimal::class.java)!!,
+                    payments = row.get("payment_count", Long::class.java)?.toInt() ?: 0,
+                    suspended = row.get("suspended", Boolean::class.java) ?: true,
+                )
+            }
+
+        log.info("Got ${result.size} results")
+        result
     }
 
     override suspend fun recordDailyBalances(balances: List<MerchantBalance>, balanceDate: LocalDate): Unit = io {
         if (balances.isEmpty()) return@io
+
+        log.info("Calculating daily balances for balanceDate=$balanceDate")
         val rows = balances.map { balance ->
             DSL.row(balance.merchantId, balanceDate, balance.amount, Currency.EUR.name)
         }
+
         dsl.transaction { cfg ->
             DSL.using(cfg).insertInto(
                 MERCHANT_DAILY_BALANCE,
@@ -102,7 +126,9 @@ class PayoutRepository(private val dsl: DSLContext) : PayoutStore, TransferStore
     }
 
     override suspend fun consecutiveNegativeDays(merchantId: UUID, balanceDate: LocalDate): Int = io {
-        dsl.resultQuery(
+        log.info("Count negative balance days for merchantId=$merchantId and on balanceDate=$balanceDate")
+
+        val result = dsl.resultQuery(
             """
             SELECT count(*)
             FROM mor.merchant_daily_balance b
@@ -115,6 +141,9 @@ class PayoutRepository(private val dsl: DSLContext) : PayoutStore, TransferStore
             """.trimIndent(),
             merchantId, balanceDate, merchantId, balanceDate,
         ).fetchOne(0, Int::class.java) ?: 0
+
+        log.info("Got result $result")
+        result
     }
 
     override suspend fun computePayouts(
@@ -125,58 +154,96 @@ class PayoutRepository(private val dsl: DSLContext) : PayoutStore, TransferStore
         val candidates = balances.filter { it.amount.signum() > 0 }
         if (candidates.isEmpty()) return@io emptyList()
 
-        dsl.transactionResult { cfg ->
+        log.info("Computing payouts on payoutDate=$payoutDate")
+
+        val result = dsl.transactionResult { cfg ->
             val db = DSL.using(cfg)
-            val transactionByMerchant = candidates.associate { it.merchantId to randomUuid() }
-
-            val transactions = db.insertInto(
-                LEDGER_TRANSACTION,
-                LEDGER_TRANSACTION.ID,
-                LEDGER_TRANSACTION.TYPE,
-            )
-            transactionByMerchant.values.forEach { transactionId ->
-                transactions.values(transactionId, LedgerTransactionType.PAYOUT.id)
-            }
-            transactions.execute()
-
-            val payouts = db.insertInto(
-                PAYOUT,
-                PAYOUT.MERCHANT_ID,
-                PAYOUT.PAYOUT_DATE,
-                PAYOUT.AMOUNT,
-                PAYOUT.CURRENCY,
-                PAYOUT.LEDGER_TRANSACTION_ID,
-                PAYOUT.STATUS,
-            )
-            candidates.forEach { balance ->
-                payouts.values(
-                    balance.merchantId,
-                    payoutDate,
-                    balance.amount,
-                    Currency.EUR.name,
-                    transactionByMerchant.getValue(balance.merchantId),
-                    PayoutStatus.COMPUTED.id,
-                )
-            }
-            val inserted = payouts
-                .onConflict(PAYOUT.MERCHANT_ID, PAYOUT.PAYOUT_DATE)
-                .doNothing()
-                .returning(PAYOUT.MERCHANT_ID, PAYOUT.LEDGER_TRANSACTION_ID)
-                .fetch()
-
-            val insertedIds = inserted.map { it.merchantId }.toSet()
-            val insertedTransactions = inserted.map { it.ledgerTransactionId }.toSet()
-            val unusedTransactions = transactionByMerchant.values - insertedTransactions
-            if (unusedTransactions.isNotEmpty()) {
-                db.deleteFrom(LEDGER_TRANSACTION)
-                    .where(LEDGER_TRANSACTION.ID.`in`(unusedTransactions))
-                    .execute()
-            }
-
             val now = OffsetDateTime.now(ZoneOffset.UTC)
+            val computed = mutableListOf<MerchantBalance>()
 
-            if (insertedIds.isNotEmpty()) {
-                val lines = db.insertInto(
+            candidates.forEach { candidate ->
+                val transactionId = randomUuid()
+                db.insertInto(LEDGER_TRANSACTION)
+                    .set(LEDGER_TRANSACTION.ID, transactionId)
+                    .set(LEDGER_TRANSACTION.TYPE, LedgerTransactionType.PAYOUT.id)
+                    .execute()
+
+                val reserved = db.insertInto(PAYOUT)
+                    .set(PAYOUT.MERCHANT_ID, candidate.merchantId)
+                    .set(PAYOUT.PAYOUT_DATE, payoutDate)
+                    .set(PAYOUT.AMOUNT, candidate.amount)
+                    .set(PAYOUT.CURRENCY, Currency.EUR.name)
+                    .set(PAYOUT.LEDGER_TRANSACTION_ID, transactionId)
+                    .set(PAYOUT.STATUS, PayoutStatus.COMPUTED.id)
+                    .onConflict(PAYOUT.MERCHANT_ID, PAYOUT.PAYOUT_DATE)
+                    .doNothing()
+                    .returning(PAYOUT.MERCHANT_ID)
+                    .fetchOne() != null
+
+                if (!reserved) {
+                    db.deleteFrom(LEDGER_TRANSACTION)
+                        .where(LEDGER_TRANSACTION.ID.eq(transactionId))
+                        .execute()
+                    return@forEach
+                }
+
+                val settledAmounts = db.resultQuery(
+                    """
+                    WITH eligible AS MATERIALIZED (
+                        SELECT le.id, le.amount
+                        FROM mor.ledger_entry le
+                        JOIN mor.ledger_transaction lt ON lt.id = le.transaction_id
+                        LEFT JOIN mor.payment p ON p.id = lt.payment_id
+                        WHERE le.purpose = ? AND le.purpose_key = ? AND le.currency = ?
+                          AND le.settled_by_transaction_id IS NULL
+                          AND lt.type <> ?
+                          AND lt.created_at < CAST(? AS timestamptz)
+                          AND le.occurred_at < CAST(? AS timestamptz)
+                          AND (p.payment_time IS NULL OR p.payment_time < CAST(? AS timestamptz))
+                        FOR UPDATE OF le
+                    ), total AS (
+                        SELECT -COALESCE(sum(amount), 0) AS amount
+                        FROM eligible
+                    ), settled AS (
+                        UPDATE mor.ledger_entry le
+                        SET settled_by_transaction_id = CAST(? AS uuid)
+                        FROM eligible e, total t
+                        WHERE le.id = e.id AND t.amount > 0
+                        RETURNING le.amount
+                    )
+                    SELECT amount FROM settled
+                    """.trimIndent(),
+                    PaymentPurpose.MERCHANT.id,
+                    candidate.merchantId.toString(),
+                    Currency.EUR.name,
+                    LedgerTransactionType.PAYOUT.id,
+                    cutoff.atOffset(ZoneOffset.UTC),
+                    cutoff.atOffset(ZoneOffset.UTC),
+                    cutoff.atOffset(ZoneOffset.UTC),
+                    transactionId,
+                ).fetch(0, BigDecimal::class.java)
+
+                val amount = settledAmounts.fold(BigDecimal.ZERO, BigDecimal::add).negate()
+                if (amount.signum() <= 0) {
+                    db.deleteFrom(PAYOUT)
+                        .where(PAYOUT.MERCHANT_ID.eq(candidate.merchantId))
+                        .and(PAYOUT.PAYOUT_DATE.eq(payoutDate))
+                        .and(PAYOUT.LEDGER_TRANSACTION_ID.eq(transactionId))
+                        .execute()
+                    db.deleteFrom(LEDGER_TRANSACTION)
+                        .where(LEDGER_TRANSACTION.ID.eq(transactionId))
+                        .execute()
+                    return@forEach
+                }
+
+                db.update(PAYOUT)
+                    .set(PAYOUT.AMOUNT, amount)
+                    .where(PAYOUT.MERCHANT_ID.eq(candidate.merchantId))
+                    .and(PAYOUT.PAYOUT_DATE.eq(payoutDate))
+                    .and(PAYOUT.LEDGER_TRANSACTION_ID.eq(transactionId))
+                    .execute()
+
+                db.insertInto(
                     LEDGER_ENTRY,
                     LEDGER_ENTRY.TRANSACTION_ID,
                     LEDGER_ENTRY.PURPOSE,
@@ -185,67 +252,40 @@ class PayoutRepository(private val dsl: DSLContext) : PayoutStore, TransferStore
                     LEDGER_ENTRY.CURRENCY,
                     LEDGER_ENTRY.OCCURRED_AT,
                 )
-                candidates.filter { it.merchantId in insertedIds }.forEach { balance ->
-                    val transactionId = transactionByMerchant.getValue(balance.merchantId)
-                    lines.values(
+                    .values(
                         transactionId, PaymentPurpose.MERCHANT.id,
-                        balance.merchantId.toString(), balance.amount, Currency.EUR.name, now,
+                        candidate.merchantId.toString(), amount, Currency.EUR.name, now,
                     )
-                    lines.values(
+                    .values(
                         transactionId, PaymentPurpose.PSP.id,
-                        null, balance.amount.negate(), Currency.EUR.name, now,
+                        null, amount.negate(), Currency.EUR.name, now,
                     )
-                }
-                lines.execute()
+                    .execute()
 
-                val settlementRows = inserted.associate { it.merchantId.toString() to it.ledgerTransactionId }
-                val valuesSql = settlementRows.keys.joinToString(",") { "(?, CAST(? AS uuid))" }
-                val settlementBindings = buildList<Any> {
-                    settlementRows.forEach { (merchantId, transactionId) ->
-                        add(merchantId)
-                        add(transactionId)
-                    }
-                    add(PaymentPurpose.MERCHANT.id)
-                    add(Currency.EUR.name)
-                    add(LedgerTransactionType.PAYOUT.id)
-                    add(cutoff.atOffset(ZoneOffset.UTC))
-                    add(cutoff.atOffset(ZoneOffset.UTC))
-                }
-                db.query(
-                    """
-                    UPDATE mor.ledger_entry le
-                    SET settled_by_transaction_id = s.transaction_id
-                    FROM (VALUES $valuesSql) AS s(purpose_key, transaction_id), mor.ledger_transaction lt
-                    LEFT JOIN mor.payment p ON p.id = lt.payment_id
-                    WHERE le.purpose_key = s.purpose_key
-                      AND lt.id = le.transaction_id
-                      AND le.purpose = ? AND le.currency = ?
-                      AND le.settled_by_transaction_id IS NULL
-                      AND lt.type <> ?
-                      AND lt.created_at < CAST(? AS timestamptz)
-                      AND (p.payment_time IS NULL OR p.payment_time < CAST(? AS timestamptz))
-                    """.trimIndent(),
-                    *settlementBindings.toTypedArray(),
-                ).execute()
+                computed += candidate.copy(amount = amount)
             }
 
-            candidates.filter { it.merchantId in insertedIds }
+            computed
         }
+
+        log.info("Got ${result.size} results")
+        result
     }
 
     override suspend fun due(limit: Int): List<DueTransfer> = io {
         if (limit !in 1..Constants.Jobs.MAX_BATCH_SIZE) return@io emptyList()
 
-        dsl.transactionResult { cfg ->
+        val result = dsl.transactionResult { cfg ->
             DSL.using(cfg).resultQuery(
                 """
             WITH candidates AS (
-                SELECT merchant_id, payout_date
-                FROM mor.payout
-                WHERE status = ?
-                   OR (status = ? AND claimed_at < now() - make_interval(mins => ${Constants.Jobs.CLAIM_TIMEOUT_MINUTES}))
-                ORDER BY payout_date, merchant_id
-                FOR UPDATE SKIP LOCKED
+                SELECT p.merchant_id, p.payout_date
+                FROM mor.payout p
+                JOIN mor.merchant_payment_details d ON d.merchant_id = p.merchant_id
+                WHERE p.status = ?
+                   OR (p.status = ? AND p.claimed_at < now() - make_interval(mins => ${Constants.Jobs.CLAIM_TIMEOUT_MINUTES}))
+                ORDER BY p.payout_date, p.merchant_id
+                FOR UPDATE OF p SKIP LOCKED
                 LIMIT ?
             ), claimed AS (
                 UPDATE mor.payout p
@@ -270,6 +310,9 @@ class PayoutRepository(private val dsl: DSLContext) : PayoutStore, TransferStore
                 )
             }
         }
+
+        log.info("Got ${result.size} results")
+        result
     }
 
     override suspend fun markSent(transfer: DueTransfer, externalReference: String): Unit = io {

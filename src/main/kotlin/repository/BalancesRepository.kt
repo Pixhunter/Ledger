@@ -8,6 +8,7 @@ import org.example.jooq.tables.references.MERCHANT
 import org.example.jooq.tables.references.MERCHANT_DAILY_BALANCE
 import org.example.model.Money
 import org.example.model.enums.PaymentPurpose
+import org.example.utils.logger
 import org.jooq.Condition
 import org.jooq.DSLContext
 import org.jooq.Field
@@ -18,29 +19,12 @@ import java.time.LocalDate
 import java.time.ZoneOffset
 import java.util.UUID
 
-/**
- * Balances are SUMs over ledger_entry, which carries its own occurred_at, so
- * every query below is one index scan on
- * (purpose, purpose_key, currency, occurred_at) with no join.
- *
- * Entries are signed - a credit is negative - so what we owe is the negated sum.
- *
- * Every report answers from one database snapshot. A report built from several
- * statements at READ COMMITTED can straddle a concurrent capture and report a
- * movement that matches neither endpoint, so a report is either a single
- * statement (aggregate FILTERs instead of repeated scans) or a REPEATABLE READ
- * READ ONLY transaction.
- *
- * Merchant reads are keyset pages ordered by merchant id - never the whole
- * ledger - so response size and memory stay bounded by the page limit.
- *
- * Both reports cut off at an instant. occurred_at is the tax point, which the
- * PSP may date up to the accepted drift into the future, so without a cutoff a
- * capture would read as available while the payout job correctly withholds it.
- */
 class BalancesRepository(private val dsl: DSLContext) {
+    val log = logger<BalancesRepository>()
 
-    suspend fun taxBalance(country: String, from: Instant?, to: Instant): TaxBalance = io {
+    suspend fun getTaxBalanceForCountry(country: String, from: Instant?, to: Instant): TaxBalance = io {
+        log.info("Got request to get tax balances for country=$country for period=$from to=$to")
+
         val row = dsl.select(owedAt(to), from?.let { owedAt(it) } ?: DSL.inline(Money.ZERO))
             .from(LEDGER_ENTRY)
             .where(LEDGER_ENTRY.PURPOSE.eq(PaymentPurpose.TAX.id))
@@ -65,12 +49,14 @@ class BalancesRepository(private val dsl: DSLContext) {
      * Entries dated after [asOf] are excluded: a capture booked with a future
      * tax point is not payable yet, and the payout job already waits for it.
      */
-    suspend fun merchantBalances(
+    suspend fun getMerchantBalances(
         merchantIds: List<UUID>,
         asOf: Instant,
         after: UUID?,
         limit: Int,
     ): List<MerchantBalanceView> = io {
+        log.info("Got request to get merchant balances for asOf=$asOf")
+
         snapshot { db ->
             val keys = merchantIds.map { it.toString() }
 
@@ -115,13 +101,15 @@ class BalancesRepository(private val dsl: DSLContext) {
      * Held is not snapshotted, so it is absent here. Empty when the job did
      * not run that day.
      */
-    suspend fun merchantBalancesOn(
+    suspend fun getMerchantBalancesOnDate(
         merchantIds: List<UUID>,
         date: LocalDate,
         after: UUID?,
         limit: Int,
     ): List<MerchantBalanceView> = io {
-        dsl.select(
+        log.info("Got request to get merchant balances for date=$date")
+
+        val result = dsl.select(
             MERCHANT_DAILY_BALANCE.MERCHANT_ID,
             MERCHANT.NAME,
             MERCHANT_DAILY_BALANCE.BALANCE,
@@ -142,6 +130,9 @@ class BalancesRepository(private val dsl: DSLContext) {
                     held = null,
                 )
             }
+
+        log.info("Got ${result.size} results")
+        result
     }
 
     private fun <T> snapshot(block: (DSLContext) -> T): T =

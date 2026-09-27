@@ -1,6 +1,6 @@
 package org.example.model.enums
 
-import org.example.model.EnumId
+import model.enums.EnumId
 
 enum class HoldReason(override val id: Short) : EnumId {
     /** Merchant is not in our system. We keep the money, a human resolves it. */

@@ -1,5 +1,8 @@
 package org.example.api.controller
 
+import ch.qos.logback.classic.Logger
+import ch.qos.logback.classic.spi.ILoggingEvent
+import ch.qos.logback.core.read.ListAppender
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.testing.testApplication
 import org.example.config.AppConfig
@@ -11,12 +14,17 @@ import org.example.jooq.tables.references.PAYMENT_HOLD
 import org.example.jooq.tables.references.PROCESSING_ERROR
 import org.example.jooq.tables.references.REFUND
 import org.example.bootstrap.ledgerModule
-import org.example.model.enumById
+import model.enums.enumById
+import org.example.model.LedgerEntry
+import org.example.model.LedgerWrite
+import org.example.model.PaymentEntity
+import org.example.model.ProcessingError
 import org.example.model.enums.HoldReason
 import org.example.model.enums.LedgerTransactionType
 import org.example.model.enums.PaymentPurpose
 import org.example.model.enums.PaymentStatus
 import org.example.service.InMemoryMerchantRegistry
+import repository.store.PaymentStore
 import org.example.support.money
 import java.time.Instant
 import kotlinx.coroutines.async
@@ -24,11 +32,41 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import org.example.api.randomUuid
 import java.time.temporal.ChronoUnit
+import org.slf4j.LoggerFactory
 
 class PaymentApiIntegrationTest : LedgerApiIntegrationTestSupport() {
+
+    @Test
+    fun `payment reference remains in controller logs after database suspension`() = testApplication {
+        val controllerLogger = LoggerFactory.getLogger(LedgerController::class.java) as Logger
+        val appender = ListAppender<ILoggingEvent>().apply { start() }
+        controllerLogger.addAppender(appender)
+
+        try {
+            application { ledgerModule(testConfig(), dsl, InMemoryMerchantRegistry(setOf(merchantId))) }
+            val reference = "psp-mdc-${randomUuid()}"
+
+            assertEquals(
+                HttpStatusCode.OK,
+                send(PAYMENT_CAPTURE_ENDPOINT, paymentBody(pspReference = reference)).status,
+            )
+
+            assertNotNull(
+                appender.list.firstOrNull {
+                    it.formattedMessage.startsWith("outcome=recorded") &&
+                        it.mdcPropertyMap["ref"] == reference &&
+                        it.mdcPropertyMap["event"] == "capture"
+                }
+            )
+        } finally {
+            controllerLogger.detachAppender(appender)
+            appender.stop()
+        }
+    }
 
     @Test
     fun `valid capture stores payment and balanced ledger entries`() = testApplication {
@@ -165,6 +203,30 @@ class PaymentApiIntegrationTest : LedgerApiIntegrationTestSupport() {
         assertEquals(HttpStatusCode.BadRequest, send(PAYMENT_CAPTURE_ENDPOINT, "{}").status)
 
         assertEquals(databaseBeforeCall, databaseSnapshot())
+    }
+
+    @Test
+    fun `internal payment failure returns server error`() = testApplication {
+        val failingStore = object : PaymentStore {
+            override suspend fun insert(
+                payment: PaymentEntity,
+                entries: List<LedgerEntry>,
+                rawPayload: String,
+                errors: List<ProcessingError>,
+            ): LedgerWrite = throw IllegalStateException("database unavailable")
+        }
+        application {
+            ledgerModule(
+                config = testConfig(),
+                dsl = dsl,
+                merchants = InMemoryMerchantRegistry(setOf(merchantId)),
+                paymentStore = failingStore,
+            )
+        }
+
+        assertEquals(HttpStatusCode.InternalServerError, send(PAYMENT_CAPTURE_ENDPOINT, paymentBody()).status)
+        assertEquals(0, dsl.fetchCount(PAYMENT))
+        assertEquals(0, dsl.fetchCount(LEDGER_TRANSACTION))
     }
 
     @Test

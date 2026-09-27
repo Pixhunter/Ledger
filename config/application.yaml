@@ -25,7 +25,7 @@ psp:
   # HMAC-SHA256 secret for webhook signatures. Local development value - the
   # real one comes from PSP_SECRET and is never committed. Blank rejects every
   # request: the endpoint fails closed.
-  secret: dev-psp-secret-change-me   # PSP_SECRET
+  secret: very_secret_key   # PSP_SECRET
   # Swagger cannot sign the body it is about to send, so locally the header
   # may be the secret itself. No header is still 401. Never true in production.
   allowSecretHeader: true            # PSP_ALLOW_SECRET_HEADER

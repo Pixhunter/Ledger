@@ -1,17 +1,15 @@
 package org.example.model.enums
 
-import org.example.model.EnumId
+import model.enums.EnumId
 
 enum class ProcessingErrorCode(override val id: Short) : EnumId {
-    MALFORMED(1),
-    IDEMPOTENCY_CONFLICT(2),
-    OVER_REFUND(3),
-    CURRENCY_MISMATCH(5),
-    INVALID_DATE(6),
-    UNKNOWN_MERCHANT(7),
-    TAX_UNRESOLVED(8),
-    NEGATIVE_BALANCE(9),
-    NEGATIVE_TAX_BALANCE(10),
-    INVALID_VAT_ID(11),
-    WEAK_TAX_COUNTRY_EVIDENCE(12),
+    IDEMPOTENCY_CONFLICT(1),
+    OVER_REFUND(2),
+    INVALID_DATE(3),
+    UNKNOWN_MERCHANT(4),
+    TAX_UNRESOLVED(5),
+    NEGATIVE_BALANCE(6),
+    NEGATIVE_TAX_BALANCE(7),
+    INVALID_VAT_ID(8),
+    WEAK_TAX_COUNTRY_EVIDENCE(9),
 }

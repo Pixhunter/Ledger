@@ -1,6 +1,6 @@
 package org.example.model.enums
 
-import org.example.model.EnumId
+import model.enums.EnumId
 
 /** SUSPENDED stops payouts; captures are still recorded. */
 enum class MerchantStatus(override val id: Short) : EnumId {

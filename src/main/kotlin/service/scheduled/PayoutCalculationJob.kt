@@ -3,10 +3,10 @@ package org.example.service.scheduled
 import org.example.model.ProcessingError
 import org.example.model.enums.EventType
 import org.example.model.enums.ProcessingErrorCode
-import org.example.repository.ProcessingErrorStore
+import repository.store.ProcessingErrorStore
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.CancellationException
-import org.example.repository.PayoutStore
+import repository.store.PayoutStore
 import java.math.BigDecimal
 import java.time.LocalDate
 import java.time.ZoneId
@@ -40,6 +40,8 @@ class PayoutCalculationJob(
     private val log = logger<PayoutCalculationJob>()
 
     suspend fun run(payoutDate: LocalDate): List<MerchantBalance> {
+        log.info("Start payout on payoutDate=$payoutDate")
+
         require(batchSize in 1..Constants.Jobs.MAX_BATCH_SIZE)
         val computed = mutableListOf<MerchantBalance>()
         val failures = mutableListOf<Throwable>()
@@ -48,19 +50,23 @@ class PayoutCalculationJob(
         val cutoff = payouts.processingCutoff(endOfDay)
 
         while (true) {
-            val balances = retry("load balance page after $cursor") {
+            val balances = retry("Load balance page after $cursor") {
                 payouts.balancePage(cursor, batchSize, cutoff)
             }
             if (balances.isEmpty()) break
 
             try {
-                retry("record daily balance batch") {
+                retry("Record daily balance batch") {
                     payouts.recordDailyBalances(balances, payoutDate)
                 }
             } catch (failure: Throwable) {
-                if (failure is CancellationException) throw failure
+                if (failure is CancellationException) {
+                    log.error("CancellationException on payoutDate=$payoutDate")
+                    throw failure
+                }
+
                 failures += failure
-                log.error("event=payout_run step=snapshot lastMerchant={} outcome=failed", balances.last().merchantId, failure)
+                log.error("Failed to payout on payoutDate=$payoutDate and lastMerchantId=${balances.last().merchantId}")
             }
 
             val payable = balances.filter { it.amount.signum() > 0 && !it.suspended }
@@ -69,9 +75,13 @@ class PayoutCalculationJob(
                     payouts.computePayouts(payable, payoutDate, cutoff)
                 }
             } catch (failure: Throwable) {
-                if (failure is CancellationException) throw failure
+                if (failure is CancellationException) {
+                    log.error("CancellationException on payoutDate=$payoutDate")
+                    throw failure
+                }
+
                 failures += failure
-                log.error("event=payout_run step=compute lastMerchant={} outcome=failed", balances.last().merchantId, failure)
+                log.error("Failed to payout on payoutDate=$payoutDate and lastMerchantId=${balances.last().merchantId}")
             }
 
             val processingErrors = mutableListOf<ProcessingError>()
@@ -88,7 +98,11 @@ class PayoutCalculationJob(
             try {
                 retry("store payout errors") { errors.saveAll(processingErrors) }
             } catch (failure: Throwable) {
-                if (failure is CancellationException) throw failure
+                if (failure is CancellationException) {
+                    log.error("CancellationException on payoutDate=$payoutDate")
+                    throw failure
+                }
+
                 failures += failure
             }
 
@@ -99,7 +113,7 @@ class PayoutCalculationJob(
             throw PayoutCalculationFailed(payoutDate, failures)
         }
 
-        log.info("event=payout_run date={} computed={}", payoutDate, computed.size)
+        log.info("Payout run date=$payoutDate computed=${computed.size}")
         return computed
     }
 
