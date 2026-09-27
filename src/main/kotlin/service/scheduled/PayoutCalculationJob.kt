@@ -85,11 +85,24 @@ class PayoutCalculationJob(
             }
 
             val processingErrors = mutableListOf<ProcessingError>()
-            balances.filter { it.amount.signum() < 0 }.forEach { balance ->
+            val negativeBalances = balances.filter { it.amount.signum() < 0 }
+            val negativeDays = try {
+                retry("load negative-balance history") {
+                    payouts.consecutiveNegativeDays(negativeBalances.map { it.merchantId }, payoutDate)
+                }
+            } catch (failure: Throwable) {
+                if (failure is CancellationException) throw failure
+                failures += failure
+                emptyMap()
+            }
+            negativeBalances.forEach { balance ->
                 try {
-                    retry("check negative balance ${balance.merchantId}") {
-                        overdueError(balance.merchantId, balance.amount, payoutDate)
-                    }?.let(processingErrors::add)
+                    overdueError(
+                        balance.merchantId,
+                        balance.amount,
+                        payoutDate,
+                        negativeDays[balance.merchantId] ?: 0,
+                    )?.let(processingErrors::add)
                 } catch (failure: Throwable) {
                     if (failure is CancellationException) throw failure
                     failures += failure
@@ -121,8 +134,8 @@ class PayoutCalculationJob(
         merchantId: UUID,
         balance: BigDecimal,
         payoutDate: LocalDate,
+        days: Int,
     ): ProcessingError? {
-        val days = payouts.consecutiveNegativeDays(merchantId, payoutDate)
         if (days < negativeDaysLimit) return null
 
         return ProcessingError(

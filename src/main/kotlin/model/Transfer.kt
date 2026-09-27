@@ -5,6 +5,8 @@ import org.example.utils.Constants
 import org.example.utils.Sensitive
 import java.math.BigDecimal
 import java.time.LocalDate
+import java.time.OffsetDateTime
+import java.time.ZoneOffset
 
 data class DueTransfer(
     val kind: TransferKind,
@@ -12,6 +14,8 @@ data class DueTransfer(
     val period: LocalDate,
     val destination: Sensitive<String>,
     val amount: BigDecimal,
+    /** Database claim timestamp; changes whenever an expired claim is reclaimed. */
+    val claimedAt: OffsetDateTime = OffsetDateTime.ofInstant(java.time.Instant.EPOCH, ZoneOffset.UTC),
     val currency: Currency = Currency.EUR,
 ) {
     /** Idempotency key: the receiver must pay one (kind, key, period) once. */
@@ -30,6 +34,11 @@ sealed interface TransferResult {
     data class Failed(val reason: String) : TransferResult
 }
 
+data class SentTransfer(
+    val transfer: DueTransfer,
+    val externalReference: String,
+)
+
 interface TransferClient {
     suspend fun send(transfer: DueTransfer): TransferResult
 }
@@ -39,7 +48,9 @@ interface TransferStore {
 
     suspend fun due(limit: Int = Constants.Jobs.CLAIM_LIMIT): List<DueTransfer>
 
-    suspend fun markSent(transfer: DueTransfer, externalReference: String)
+    /** Returns rows updated; stale claims are deliberately ignored. */
+    suspend fun markSent(transfers: List<SentTransfer>): Int
 
-    suspend fun release(transfer: DueTransfer)
+    /** Returns rows updated; stale claims are deliberately ignored. */
+    suspend fun release(transfers: List<DueTransfer>): Int
 }

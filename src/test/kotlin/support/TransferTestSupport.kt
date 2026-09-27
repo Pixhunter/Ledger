@@ -4,6 +4,7 @@ import model.DueTransfer
 import model.TransferClient
 import model.TransferResult
 import model.TransferStore
+import model.SentTransfer
 
 class RecordingTransferClient(
     private val result: (DueTransfer) -> TransferResult = { TransferResult.Accepted("ext-${it.reference}") },
@@ -34,11 +35,13 @@ class FakeTransferStore(due: List<DueTransfer> = emptyList()) : TransferStore {
         return claimed
     }
 
-    override suspend fun markSent(transfer: DueTransfer, externalReference: String) {
-        marked += transfer to externalReference
+    override suspend fun markSent(transfers: List<SentTransfer>): Int {
+        marked += transfers.map { it.transfer to it.externalReference }
+        return transfers.size
     }
 
-    override suspend fun release(transfer: DueTransfer) {
-        released += transfer
+    override suspend fun release(transfers: List<DueTransfer>): Int {
+        released += transfers
+        return transfers.size
     }
 }

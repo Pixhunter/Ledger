@@ -36,10 +36,13 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import org.example.api.randomUuid
 import model.TransferKind
+import model.SentTransfer
 import org.example.support.RecordingTransferClient
 import org.example.model.enums.MerchantStatus
 import org.example.api.controller.LedgerApiIntegrationTestSupport
 import org.example.api.apiJson
+import org.jooq.impl.DSL
+import kotlin.test.assertNotEquals
 
 class PayoutAndTaxIntegrationTest : LedgerApiIntegrationTestSupport() {
 
@@ -117,6 +120,72 @@ class PayoutAndTaxIntegrationTest : LedgerApiIntegrationTestSupport() {
             assertEquals(0, runBlocking { DisbursementJob(TransferKind.PAYOUT, payoutStore, psp).run() })
             assertEquals(1, dsl.fetchCount(PAYOUT))
         }
+
+    @Test
+    fun `an expired worker cannot complete a payout reclaimed by another worker`() = testApplication {
+        application { ledgerModule(testConfig(), dsl, InMemoryMerchantRegistry(setOf(merchantId))) }
+        seedMerchant()
+        assertEquals(HttpStatusCode.OK, send(PAYMENT_CAPTURE_ENDPOINT, paymentBody()).status)
+        assertEquals(1, runBlocking { PayoutCalculationJob(payoutStore, errors).run(payoutDate) }.size)
+
+        val expiredWorker = runBlocking { payoutStore.due(1) }.single()
+        dsl.transaction { cfg ->
+            DSL.using(cfg).update(PAYOUT)
+                .set(PAYOUT.CLAIMED_AT, expiredWorker.claimedAt.minusMinutes(10))
+                .where(PAYOUT.MERCHANT_ID.eq(merchantId))
+                .and(PAYOUT.PAYOUT_DATE.eq(payoutDate))
+                .execute()
+        }
+
+        val currentWorker = runBlocking { payoutStore.due(1) }.single()
+        assertNotEquals(expiredWorker.claimedAt, currentWorker.claimedAt)
+
+        assertEquals(
+            0,
+            runBlocking { payoutStore.markSent(listOf(SentTransfer(expiredWorker, "stale-reference"))) },
+        )
+        assertEquals(PayoutStatus.PROCESSING, enumById<PayoutStatus>(dsl.selectFrom(PAYOUT).fetchSingle().status))
+
+        assertEquals(
+            1,
+            runBlocking { payoutStore.markSent(listOf(SentTransfer(currentWorker, "current-reference"))) },
+        )
+        val payout = dsl.selectFrom(PAYOUT).fetchSingle()
+        assertEquals(PayoutStatus.SENT, enumById<PayoutStatus>(payout.status))
+        assertEquals("current-reference", payout.pspReference)
+    }
+
+    @Test
+    fun `a merchant batch is computed without losing or duplicating payouts`() = testApplication {
+        val merchants = List(40) { randomUuid() }
+        application { ledgerModule(testConfig(), dsl, InMemoryMerchantRegistry(merchants.toSet())) }
+
+        merchants.forEachIndexed { index, id ->
+            seedMerchant(id)
+            assertEquals(
+                HttpStatusCode.OK,
+                send(PAYMENT_CAPTURE_ENDPOINT, paymentBody(pspReference = "batch-$index", merchantId = id)).status,
+            )
+        }
+
+        val cutoff = Instant.now().plusSeconds(1)
+        val balances = runBlocking { payoutStore.balancePage(null, merchants.size, cutoff) }
+        val computed = runBlocking { payoutStore.computePayouts(balances, payoutDate, cutoff) }
+
+        assertEquals(merchants.toSet(), computed.map { it.merchantId }.toSet())
+        assertEquals(merchants.size, dsl.fetchCount(PAYOUT))
+        assertEquals(
+            merchants.size,
+            dsl.fetchCount(
+                LEDGER_TRANSACTION,
+                LEDGER_TRANSACTION.TYPE.eq(LedgerTransactionType.PAYOUT.id),
+            ),
+        )
+        assertEquals(money("0"), entries().balance(PaymentPurpose.MERCHANT))
+
+        assertTrue(runBlocking { payoutStore.computePayouts(balances, payoutDate, cutoff) }.isEmpty())
+        assertEquals(merchants.size, dsl.fetchCount(PAYOUT))
+    }
 
     @Test
     fun `payment arriving after balance read is included in payout amount when settled`() = testApplication {
@@ -296,7 +365,7 @@ class PayoutAndTaxIntegrationTest : LedgerApiIntegrationTestSupport() {
             HttpStatusCode.OK,
             send(
                 PAYMENT_CAPTURE_ENDPOINT,
-                paymentBody(paymentTime = Instant.parse("2026-09-23T10:00:00Z")),
+                paymentBody(paymentTime = Instant.now().minusSeconds(2 * 24 * 60 * 60L)),
             ).status,
         )
 

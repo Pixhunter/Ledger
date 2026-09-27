@@ -113,17 +113,19 @@ class TaxJobsTest {
             snapshots += liabilities.map { it.country to it.amount }
         }
 
-        override suspend fun consecutiveNegativeDays(country: String, balanceDate: LocalDate) = negativeDays
+        override suspend fun consecutiveNegativeDays(
+            countries: Collection<String>,
+            balanceDate: LocalDate,
+        ) = countries.associateWith { negativeDays }
 
-        override suspend fun computeRemittance(
-            country: String,
+        override suspend fun computeRemittances(
+            liabilities: Collection<TaxLiability>,
             periodStart: LocalDate,
             cutoff: java.time.Instant,
-        ): java.math.BigDecimal? {
-            if (alreadyFiled) return null
-            val amount = liabilities.single { it.country == country }.amount
-            computed += country to amount
-            return amount
+        ): Map<String, java.math.BigDecimal> {
+            if (alreadyFiled) return emptyMap()
+            computed += liabilities.map { it.country to it.amount }
+            return liabilities.associate { it.country to it.amount }
         }
     }
 

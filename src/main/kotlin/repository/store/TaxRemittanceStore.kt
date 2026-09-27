@@ -16,19 +16,16 @@ interface TaxRemittanceStore {
 
     suspend fun recordDailyBalances(liabilities: List<TaxLiability>, balanceDate: LocalDate)
 
-    /** How many days up to and including balanceDate this country has been negative. */
-    suspend fun consecutiveNegativeDays(country: String, balanceDate: LocalDate): Int
+    /** Consecutive negative days for all requested countries, loaded in one query. */
+    suspend fun consecutiveNegativeDays(
+        countries: Collection<String>,
+        balanceDate: LocalDate,
+    ): Map<String, Int>
 
-    /**
-     * Files one country's period: settles every unsettled TAX entry dated
-     * before [cutoff] and books the remittance against exactly that amount.
-     * Returns what was filed, or null when the period is already filed or
-     * nothing is owed. The settle and the sum are one statement, so an entry
-     * arriving mid-run is either fully inside this filing or fully outside it.
-     */
-    suspend fun computeRemittance(
-        country: String,
+    /** Files all supplied countries in one set-based transaction. */
+    suspend fun computeRemittances(
+        liabilities: Collection<TaxLiability>,
         periodStart: LocalDate,
         cutoff: Instant,
-    ): BigDecimal?
+    ): Map<String, BigDecimal>
 }

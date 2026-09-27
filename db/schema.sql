@@ -206,7 +206,7 @@ CREATE TABLE mor.processing_error (
     error_code smallint NOT NULL,
     error_detail text NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT processing_error_code_ck CHECK ((error_code = ANY (ARRAY[1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12]))),
+    CONSTRAINT processing_error_code_ck CHECK ((error_code = ANY (ARRAY[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]))),
     CONSTRAINT processing_error_event_ck CHECK ((event_type = ANY (ARRAY[1, 2, 3, 4])))
 );
 
@@ -402,6 +402,13 @@ CREATE INDEX ledger_entry_transaction_idx ON mor.ledger_entry USING btree (trans
 
 
 --
+-- Name: ledger_entry_settlement_transaction_idx; Type: INDEX; Schema: mor; Owner: -
+--
+
+CREATE INDEX ledger_entry_settlement_transaction_idx ON mor.ledger_entry USING btree (settled_by_transaction_id) WHERE (settled_by_transaction_id IS NOT NULL);
+
+
+--
 -- Name: ledger_entry_unsettled_merchant_idx; Type: INDEX; Schema: mor; Owner: -
 --
 
@@ -454,7 +461,14 @@ CREATE INDEX payout_date_idx ON mor.payout USING btree (payout_date);
 -- Name: payout_due_idx; Type: INDEX; Schema: mor; Owner: -
 --
 
-CREATE INDEX payout_due_idx ON mor.payout USING btree (status, payout_date);
+CREATE INDEX payout_due_idx ON mor.payout USING btree (status, claimed_at, payout_date, merchant_id);
+
+
+--
+-- Name: payout_ledger_transaction_uk; Type: INDEX; Schema: mor; Owner: -
+--
+
+CREATE UNIQUE INDEX payout_ledger_transaction_uk ON mor.payout USING btree (ledger_transaction_id);
 
 
 --
@@ -503,7 +517,14 @@ CREATE INDEX tax_daily_balance_idx ON mor.tax_daily_balance USING btree (country
 -- Name: tax_remittance_due_idx; Type: INDEX; Schema: mor; Owner: -
 --
 
-CREATE INDEX tax_remittance_due_idx ON mor.tax_remittance USING btree (status, period_start);
+CREATE INDEX tax_remittance_due_idx ON mor.tax_remittance USING btree (status, claimed_at, period_start, country);
+
+
+--
+-- Name: tax_remittance_ledger_transaction_uk; Type: INDEX; Schema: mor; Owner: -
+--
+
+CREATE UNIQUE INDEX tax_remittance_ledger_transaction_uk ON mor.tax_remittance USING btree (ledger_transaction_id);
 
 
 --
@@ -599,4 +620,3 @@ ALTER TABLE ONLY mor.tax_remittance
 --
 
 \unrestrict Bql0HVZpzafUEA9AsdsOqn0ZjVvrFzub1f48qQS6tvRCL30cMC7UGDc2oSfLDGa
-

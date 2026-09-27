@@ -21,7 +21,7 @@ CREATE TABLE mor.processing_error
     created_at         timestamptz NOT NULL DEFAULT now(),
 
     CONSTRAINT processing_error_event_ck CHECK (event_type IN (1, 2, 3, 4)),
-    CONSTRAINT processing_error_code_ck  CHECK (error_code IN (1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12))
+    CONSTRAINT processing_error_code_ck  CHECK (error_code IN (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12))
 );
 
 -- A PSP retry of the same broken event must not add a second row.

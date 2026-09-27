@@ -30,15 +30,11 @@ class TaxRemittanceCalculationJob(
 
     suspend fun run(periodStart: LocalDate): List<TaxLiability> {
         val periodEnd = periodStart.plusMonths(1).atStartOfDay(reportingZone).toInstant()
-        val computed = mutableListOf<TaxLiability>()
-
-        remittances.liabilities(periodEnd)
-            .filter { it.amount.signum() > 0 }
-            .forEach { liability ->
-                val filed = remittances.computeRemittance(liability.country, periodStart, periodEnd)
-                if (filed == null) log.info("event=tax_filing country={} period={} outcome=skipped", liability.country, periodStart)
-                else computed += liability.copy(amount = filed)
-            }
+        val liabilities = remittances.liabilities(periodEnd).filter { it.amount.signum() > 0 }
+        val filed = remittances.computeRemittances(liabilities, periodStart, periodEnd)
+        val computed = liabilities.mapNotNull { liability ->
+            filed[liability.country]?.let { liability.copy(amount = it) }
+        }
 
         log.info("event=tax_run period={} computed={}", periodStart, computed.size)
         return computed

@@ -181,6 +181,9 @@ CREATE TABLE mor.ledger_entry
 CREATE INDEX ledger_entry_balance_idx
     ON mor.ledger_entry (purpose, purpose_key, currency, occurred_at);
 CREATE INDEX ledger_entry_transaction_idx ON mor.ledger_entry (transaction_id);
+CREATE INDEX ledger_entry_settlement_transaction_idx
+    ON mor.ledger_entry (settled_by_transaction_id)
+    WHERE settled_by_transaction_id IS NOT NULL;
 CREATE INDEX ledger_entry_unsettled_merchant_idx
     ON mor.ledger_entry (purpose, purpose_key, currency, id)
     WHERE settled_by_transaction_id IS NULL;
@@ -212,7 +215,8 @@ CREATE TABLE mor.payout
 );
 
 CREATE INDEX payout_date_idx ON mor.payout (payout_date);
-CREATE INDEX payout_due_idx ON mor.payout (status, payout_date);
+CREATE UNIQUE INDEX payout_ledger_transaction_uk ON mor.payout (ledger_transaction_id);
+CREATE INDEX payout_due_idx ON mor.payout (status, claimed_at, payout_date, merchant_id);
 
 
 -- ---------------------------------------------------------------------------
@@ -269,7 +273,10 @@ CREATE TABLE mor.tax_remittance
     CONSTRAINT tax_remittance_currency_ck CHECK (currency ~ '^[A-Z]{3}$')
 );
 
-CREATE INDEX tax_remittance_due_idx ON mor.tax_remittance (status, period_start);
+CREATE UNIQUE INDEX tax_remittance_ledger_transaction_uk
+    ON mor.tax_remittance (ledger_transaction_id);
+CREATE INDEX tax_remittance_due_idx
+    ON mor.tax_remittance (status, claimed_at, period_start, country);
 
 
 -- ---------------------------------------------------------------------------

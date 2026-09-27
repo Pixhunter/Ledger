@@ -163,7 +163,10 @@ class PayoutJobsTest {
             return balances
         }
 
-        override suspend fun consecutiveNegativeDays(merchantId: UUID, balanceDate: LocalDate) = negativeDays
+        override suspend fun consecutiveNegativeDays(
+            merchantIds: Collection<UUID>,
+            balanceDate: LocalDate,
+        ) = merchantIds.associateWith { negativeDays }
     }
 
     private class RecordingErrors : ProcessingErrorStore {

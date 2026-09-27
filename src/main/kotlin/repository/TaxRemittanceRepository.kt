@@ -3,6 +3,7 @@ package org.example.repository
 import model.DueTransfer
 import model.TransferKind
 import model.TransferStore
+import model.SentTransfer
 import org.example.jooq.tables.references.LEDGER_ENTRY
 import org.example.jooq.tables.references.LEDGER_TRANSACTION
 import org.example.jooq.tables.references.TAX_DAILY_BALANCE
@@ -95,100 +96,195 @@ class TaxRemittanceRepository(private val dsl: DSLContext) : TaxRemittanceStore,
         }
     }
 
-    override suspend fun consecutiveNegativeDays(country: String, balanceDate: LocalDate): Int = io {
-        log.info("Select negative days for date=$balanceDate")
-        val result = dsl.resultQuery(
-            """
-            SELECT count(*)
-            FROM mor.tax_daily_balance b
-            WHERE b.country = ? AND b.balance_date <= ? AND b.balance < 0
-              AND b.balance_date > COALESCE((
-                  SELECT max(x.balance_date)
-                  FROM mor.tax_daily_balance x
-                  WHERE x.country = ? AND x.balance_date <= ? AND x.balance >= 0
-              ), DATE '-infinity')
-            """.trimIndent(),
-            country, balanceDate, country, balanceDate,
-        ).fetchOne(0, Int::class.java) ?: 0
+    override suspend fun consecutiveNegativeDays(
+        countries: Collection<String>,
+        balanceDate: LocalDate,
+    ): Map<String, Int> = io {
+        val keys = countries.distinct()
+        if (keys.isEmpty()) return@io emptyMap()
+        val values = keys.joinToString(", ") { "(CAST(? AS text))" }
+        val bindings = buildList<Any> {
+            addAll(keys)
+            add(balanceDate)
+            add(balanceDate)
+        }
 
-        log.info("Got $result negative days")
-        result
+        dsl.resultQuery(
+            """
+            WITH requested(country) AS (VALUES $values),
+            last_non_negative AS (
+                SELECT b.country, max(b.balance_date) AS balance_date
+                FROM mor.tax_daily_balance b
+                JOIN requested r USING (country)
+                WHERE b.balance_date <= CAST(? AS date) AND b.balance >= 0
+                GROUP BY b.country
+            )
+            SELECT r.country, count(b.balance_date) AS negative_days
+            FROM requested r
+            LEFT JOIN last_non_negative n USING (country)
+            LEFT JOIN mor.tax_daily_balance b
+              ON b.country = r.country
+             AND b.balance_date <= CAST(? AS date)
+             AND b.balance_date > COALESCE(n.balance_date, DATE '-infinity')
+             AND b.balance < 0
+            GROUP BY r.country
+            """.trimIndent(),
+            *bindings.toTypedArray(),
+        ).fetch().associate { row ->
+            row.get("country", String::class.java)!! to
+                (row.get("negative_days", Long::class.java)?.toInt() ?: 0)
+        }
     }
 
-    override suspend fun computeRemittance(
-        country: String,
+    override suspend fun computeRemittances(
+        liabilities: Collection<TaxLiability>,
         periodStart: LocalDate,
         cutoff: Instant,
-    ): BigDecimal? = io {
-        log.info("Computing tax remittance for country=$country date=$cutoff")
+    ): Map<String, BigDecimal> = io {
+        val candidates = liabilities.filter { it.amount.signum() > 0 }.distinctBy { it.country }
+        if (candidates.isEmpty()) return@io emptyMap()
 
-        runCatching {
-            dsl.transactionResult { cfg ->
-                val db = DSL.using(cfg)
-                val transactionId = randomUuid()
-                val now = OffsetDateTime.now(ZoneOffset.UTC)
+        dsl.transactionResult { cfg ->
+            val db = DSL.using(cfg)
+            val inputs = candidates.map { it to randomUuid() }
 
-                db.insertInto(LEDGER_TRANSACTION)
-                    .set(LEDGER_TRANSACTION.ID, transactionId)
-                    .set(LEDGER_TRANSACTION.TYPE, LedgerTransactionType.PAYOUT.id)
-                    .execute()
+            db.insertInto(
+                LEDGER_TRANSACTION,
+                LEDGER_TRANSACTION.ID,
+                LEDGER_TRANSACTION.TYPE,
+            )
+                .valuesOfRows(inputs.map { (_, transactionId) ->
+                    DSL.row(transactionId, LedgerTransactionType.PAYOUT.id)
+                })
+                .execute()
 
-                val amount = db.resultQuery(
-                    """
-                    WITH settled AS (
-                        UPDATE mor.ledger_entry le
-                        SET settled_by_transaction_id = ?
-                        FROM mor.ledger_transaction lt
-                        WHERE lt.id = le.transaction_id
-                          AND le.purpose = ? AND le.purpose_key = ? AND le.currency = ?
-                          AND le.settled_by_transaction_id IS NULL
-                          AND lt.type <> ${LedgerTransactionType.PAYOUT.id}
-                          AND le.occurred_at < CAST(? AS timestamptz)
-                        RETURNING le.amount
+            val reserved = db.insertInto(
+                TAX_REMITTANCE,
+                TAX_REMITTANCE.COUNTRY,
+                TAX_REMITTANCE.PERIOD_START,
+                TAX_REMITTANCE.AMOUNT,
+                TAX_REMITTANCE.CURRENCY,
+                TAX_REMITTANCE.LEDGER_TRANSACTION_ID,
+                TAX_REMITTANCE.STATUS,
+            )
+                .valuesOfRows(inputs.map { (liability, transactionId) ->
+                    DSL.row(
+                        liability.country,
+                        periodStart,
+                        liability.amount,
+                        Currency.EUR.name,
+                        transactionId,
+                        PayoutStatus.COMPUTED.id,
                     )
-                    SELECT COALESCE(-sum(amount), 0) FROM settled
-                    """.trimIndent(),
-                    transactionId, PaymentPurpose.TAX.id, country, Currency.EUR.name,
-                    cutoff.atOffset(ZoneOffset.UTC),
-                ).fetchSingle(0, BigDecimal::class.java)
+                })
+                .onConflict(TAX_REMITTANCE.COUNTRY, TAX_REMITTANCE.PERIOD_START)
+                .doNothing()
+                .returning(TAX_REMITTANCE.COUNTRY, TAX_REMITTANCE.LEDGER_TRANSACTION_ID)
+                .fetch()
+                .map { it.get(TAX_REMITTANCE.COUNTRY)!! to it.get(TAX_REMITTANCE.LEDGER_TRANSACTION_ID)!! }
 
-                if (amount == null || amount.signum() <= 0) throw NothingToFile()
-
-                val claimed = db.insertInto(TAX_REMITTANCE)
-                    .set(TAX_REMITTANCE.COUNTRY, country)
-                    .set(TAX_REMITTANCE.PERIOD_START, periodStart)
-                    .set(TAX_REMITTANCE.AMOUNT, amount)
-                    .set(TAX_REMITTANCE.CURRENCY, Currency.EUR.name)
-                    .set(TAX_REMITTANCE.LEDGER_TRANSACTION_ID, transactionId)
-                    .set(TAX_REMITTANCE.STATUS, PayoutStatus.COMPUTED.id)
-                    .onConflict(TAX_REMITTANCE.COUNTRY, TAX_REMITTANCE.PERIOD_START)
-                    .doNothing()
+            if (reserved.isEmpty()) {
+                db.deleteFrom(LEDGER_TRANSACTION)
+                    .where(LEDGER_TRANSACTION.ID.`in`(inputs.map { it.second }))
                     .execute()
-
-                if (claimed == 0) throw AlreadyFiled()
-
-                db.insertInto(
-                    LEDGER_ENTRY,
-                    LEDGER_ENTRY.TRANSACTION_ID,
-                    LEDGER_ENTRY.PURPOSE,
-                    LEDGER_ENTRY.PURPOSE_KEY,
-                    LEDGER_ENTRY.AMOUNT,
-                    LEDGER_ENTRY.CURRENCY,
-                    LEDGER_ENTRY.OCCURRED_AT,
-                )
-                    .values(
-                        transactionId, PaymentPurpose.TAX.id,
-                        country, amount, Currency.EUR.name, now,
-                    )
-                    .values(
-                        transactionId, PaymentPurpose.PSP.id,
-                        null, amount.negate(), Currency.EUR.name, now,
-                    )
-                    .execute()
-
-                amount
+                return@transactionResult emptyMap()
             }
-        }.getOrElse { e -> if (e is AlreadyFiled || e is NothingToFile) null else throw e }
+
+            val reservedValues = reserved.joinToString(", ") { "(CAST(? AS text), CAST(? AS uuid))" }
+            val bindings = buildList<Any> {
+                reserved.forEach { (country, transactionId) ->
+                    add(country)
+                    add(transactionId)
+                }
+                add(PaymentPurpose.TAX.id)
+                add(Currency.EUR.name)
+                add(LedgerTransactionType.PAYOUT.id)
+                add(cutoff.atOffset(ZoneOffset.UTC))
+                add(periodStart)
+                add(PaymentPurpose.TAX.id)
+                add(PaymentPurpose.PSP.id)
+            }
+
+            val computedRows = db.resultQuery(
+                """
+                WITH reserved(country, transaction_id) AS (
+                    VALUES $reservedValues
+                ), eligible AS MATERIALIZED (
+                    SELECT le.id, le.amount, r.country, r.transaction_id
+                    FROM mor.ledger_entry le
+                    JOIN reserved r ON le.purpose_key = r.country
+                    JOIN mor.ledger_transaction lt ON lt.id = le.transaction_id
+                    WHERE le.purpose = ? AND le.currency = ?
+                      AND le.settled_by_transaction_id IS NULL
+                      AND lt.type <> ?
+                      AND le.occurred_at < CAST(? AS timestamptz)
+                    FOR UPDATE OF le
+                ), totals AS (
+                    SELECT country, transaction_id, -sum(amount) AS amount
+                    FROM eligible
+                    GROUP BY country, transaction_id
+                ), settled AS (
+                    UPDATE mor.ledger_entry le
+                    SET settled_by_transaction_id = t.transaction_id
+                    FROM eligible e
+                    JOIN totals t USING (country, transaction_id)
+                    WHERE le.id = e.id AND t.amount > 0
+                    RETURNING le.purpose_key AS country,
+                              le.settled_by_transaction_id AS transaction_id,
+                              le.amount
+                ), actual AS (
+                    SELECT country, transaction_id, -sum(amount) AS amount
+                    FROM settled
+                    GROUP BY country, transaction_id
+                ), updated_remittances AS (
+                    UPDATE mor.tax_remittance r
+                    SET amount = a.amount
+                    FROM actual a
+                    WHERE r.country = a.country
+                      AND r.period_start = CAST(? AS date)
+                      AND r.ledger_transaction_id = a.transaction_id
+                    RETURNING r.country, r.ledger_transaction_id, r.amount
+                ), inserted_entries AS (
+                    INSERT INTO mor.ledger_entry (
+                        transaction_id, purpose, purpose_key, amount, currency, occurred_at
+                    )
+                    SELECT r.ledger_transaction_id, entry.purpose, entry.purpose_key,
+                           entry.amount, '${Currency.EUR.name}', clock_timestamp()
+                    FROM updated_remittances r
+                    CROSS JOIN LATERAL (
+                        VALUES
+                            (CAST(? AS smallint), r.country, r.amount),
+                            (CAST(? AS smallint), NULL::text, -r.amount)
+                    ) AS entry(purpose, purpose_key, amount)
+                    RETURNING transaction_id
+                )
+                SELECT country, ledger_transaction_id, amount
+                FROM updated_remittances
+                ORDER BY country
+                """.trimIndent(),
+                *bindings.toTypedArray(),
+            ).fetch()
+
+            val completedIds = computedRows
+                .mapNotNull { it.get("ledger_transaction_id", java.util.UUID::class.java) }
+                .toSet()
+            val unusedReservedIds = reserved.map { it.second }.filterNot(completedIds::contains)
+            if (unusedReservedIds.isNotEmpty()) {
+                db.deleteFrom(TAX_REMITTANCE)
+                    .where(TAX_REMITTANCE.LEDGER_TRANSACTION_ID.`in`(unusedReservedIds))
+                    .execute()
+            }
+            val unusedTransactionIds = inputs.map { it.second }.filterNot(completedIds::contains)
+            if (unusedTransactionIds.isNotEmpty()) {
+                db.deleteFrom(LEDGER_TRANSACTION)
+                    .where(LEDGER_TRANSACTION.ID.`in`(unusedTransactionIds))
+                    .execute()
+            }
+
+            computedRows.associate { row ->
+                row.get("country", String::class.java)!! to row.get("amount", BigDecimal::class.java)!!
+            }
+        }
     }
 
     override suspend fun due(limit: Int): List<DueTransfer> = io {
@@ -201,19 +297,19 @@ class TaxRemittanceRepository(private val dsl: DSLContext) : TaxRemittanceStore,
             WITH candidates AS (
                 SELECT country, period_start
                 FROM mor.tax_remittance
-                WHERE status = ?
-                   OR (status = ? AND claimed_at < now() - make_interval(mins => ${Constants.Jobs.CLAIM_TIMEOUT_MINUTES}))
+                WHERE status = ${PayoutStatus.COMPUTED.id}
+                   OR (status = ${PayoutStatus.PROCESSING.id} AND claimed_at < now() - make_interval(mins => ${Constants.Jobs.CLAIM_TIMEOUT_MINUTES}))
                 ORDER BY period_start, country
                 FOR UPDATE SKIP LOCKED
                 LIMIT ?
             )
             UPDATE mor.tax_remittance r
-            SET status = ?, claimed_at = now()
+            SET status = ${PayoutStatus.PROCESSING.id}, claimed_at = clock_timestamp()
             FROM candidates c
             WHERE r.country = c.country AND r.period_start = c.period_start
-            RETURNING r.country, r.period_start, r.amount
+            RETURNING r.country, r.period_start, r.amount, r.claimed_at
             """.trimIndent(),
-                PayoutStatus.COMPUTED.id, PayoutStatus.PROCESSING.id, limit, PayoutStatus.PROCESSING.id,
+                limit,
             ).fetch().map { row ->
                 val country = row.get(0, String::class.java)!!
                 DueTransfer(
@@ -222,6 +318,7 @@ class TaxRemittanceRepository(private val dsl: DSLContext) : TaxRemittanceStore,
                     period = row.get(1, LocalDate::class.java)!!,
                     destination = country.sensitive(),
                     amount = row.get(2, BigDecimal::class.java)!!,
+                    claimedAt = row.get(3, OffsetDateTime::class.java)!!,
                 )
             }
         }
@@ -230,33 +327,61 @@ class TaxRemittanceRepository(private val dsl: DSLContext) : TaxRemittanceStore,
         result
     }
 
-    override suspend fun markSent(transfer: DueTransfer, externalReference: String): Unit = io {
-        dsl.transaction { cfg ->
-            DSL.using(cfg)
-                .update(TAX_REMITTANCE)
-                .set(TAX_REMITTANCE.STATUS, PayoutStatus.SENT.id)
-                .set(TAX_REMITTANCE.REFERENCE, externalReference)
-                .where(claim(transfer))
-                .execute()
+    override suspend fun markSent(transfers: List<SentTransfer>): Int = io {
+        if (transfers.isEmpty()) return@io 0
+        val values = transfers.joinToString(", ") {
+            "(CAST(? AS text), CAST(? AS date), CAST(? AS timestamptz), CAST(? AS text))"
+        }
+        val bindings = buildList<Any> {
+            transfers.forEach {
+                addAll(listOf(
+                    it.transfer.key,
+                    it.transfer.period,
+                    it.transfer.claimedAt,
+                    it.externalReference,
+                ))
+            }
+        }
+        dsl.transactionResult { cfg ->
+            DSL.using(cfg).execute(
+                """
+                WITH sent(country, period_start, claimed_at, external_reference) AS (VALUES $values)
+                UPDATE mor.tax_remittance r
+                SET status = ${PayoutStatus.SENT.id}, reference = s.external_reference
+                FROM sent s
+                WHERE r.country = s.country
+                  AND r.period_start = s.period_start
+                  AND r.status = ${PayoutStatus.PROCESSING.id}
+                  AND r.claimed_at = s.claimed_at
+                """.trimIndent(),
+                *bindings.toTypedArray(),
+            )
         }
     }
 
-    override suspend fun release(transfer: DueTransfer): Unit = io {
-        dsl.transaction { cfg ->
-            DSL.using(cfg).update(TAX_REMITTANCE)
-                .set(TAX_REMITTANCE.STATUS, PayoutStatus.COMPUTED.id)
-                .setNull(TAX_REMITTANCE.CLAIMED_AT)
-                .where(claim(transfer))
-                .execute()
+    override suspend fun release(transfers: List<DueTransfer>): Int = io {
+        if (transfers.isEmpty()) return@io 0
+        val values = transfers.joinToString(", ") {
+            "(CAST(? AS text), CAST(? AS date), CAST(? AS timestamptz))"
+        }
+        val bindings = buildList<Any> {
+            transfers.forEach { addAll(listOf(it.key, it.period, it.claimedAt)) }
+        }
+        dsl.transactionResult { cfg ->
+            DSL.using(cfg).execute(
+                """
+                WITH released(country, period_start, claimed_at) AS (VALUES $values)
+                UPDATE mor.tax_remittance r
+                SET status = ${PayoutStatus.COMPUTED.id}, claimed_at = NULL
+                FROM released x
+                WHERE r.country = x.country
+                  AND r.period_start = x.period_start
+                  AND r.status = ${PayoutStatus.PROCESSING.id}
+                  AND r.claimed_at = x.claimed_at
+                """.trimIndent(),
+                *bindings.toTypedArray(),
+            )
         }
     }
 
-    private fun claim(transfer: DueTransfer) =
-        TAX_REMITTANCE.COUNTRY.eq(transfer.key)
-            .and(TAX_REMITTANCE.PERIOD_START.eq(transfer.period))
-            .and(TAX_REMITTANCE.STATUS.eq(PayoutStatus.PROCESSING.id))
-
-    private class AlreadyFiled : RuntimeException()
-
-    private class NothingToFile : RuntimeException()
 }

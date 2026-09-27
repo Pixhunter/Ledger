@@ -14,8 +14,11 @@ interface PayoutStore {
 
     suspend fun recordDailyBalances(balances: List<MerchantBalance>, balanceDate: LocalDate)
 
-    /** How many business days up to and including balanceDate this merchant has been negative. */
-    suspend fun consecutiveNegativeDays(merchantId: UUID, balanceDate: LocalDate): Int
+    /** Consecutive negative days for all requested merchants, loaded in one query. */
+    suspend fun consecutiveNegativeDays(
+        merchantIds: Collection<UUID>,
+        balanceDate: LocalDate,
+    ): Map<UUID, Int>
 
     suspend fun computePayouts(
         balances: List<MerchantBalance>,

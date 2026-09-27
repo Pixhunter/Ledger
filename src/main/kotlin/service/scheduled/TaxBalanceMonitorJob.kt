@@ -33,11 +33,11 @@ class TaxBalanceMonitorJob(
         val endOfDay = balanceDate.plusDays(1).atStartOfDay(reportingZone).toInstant()
         val liabilities = remittances.liabilities(endOfDay)
         remittances.recordDailyBalances(liabilities, balanceDate)
+        val negative = liabilities.filter { it.amount.signum() < 0 }
+        val negativeDays = remittances.consecutiveNegativeDays(negative.map { it.country }, balanceDate)
 
-        liabilities.forEach { liability ->
-            if (liability.amount.signum() >= 0) return@forEach
-
-            val days = remittances.consecutiveNegativeDays(liability.country, balanceDate)
+        negative.forEach { liability ->
+            val days = negativeDays[liability.country] ?: 0
             if (days < negativeDaysLimit) return@forEach
 
             processingErrors += error(liability.country, liability.amount, days, balanceDate)

@@ -5,6 +5,7 @@ import model.TransferClient
 import model.TransferKind
 import model.TransferResult
 import model.TransferStore
+import model.SentTransfer
 import org.example.utils.Constants
 import org.example.utils.logger
 
@@ -40,13 +41,11 @@ class DisbursementJob(
                 val due = transfers.due(batchSize)
                 if (due.isEmpty()) break
                 batches++
+                val accepted = mutableListOf<SentTransfer>()
 
                 due.forEach { transfer ->
                     when (val result = client.send(transfer)) {
-                        is TransferResult.Accepted -> {
-                            transfers.markSent(transfer, result.reference)
-                            sent++
-                        }
+                        is TransferResult.Accepted -> accepted += SentTransfer(transfer, result.reference)
 
                         is TransferResult.Failed -> {
                             failed += transfer
@@ -54,9 +53,10 @@ class DisbursementJob(
                         }
                     }
                 }
+                sent += transfers.markSent(accepted)
             }
         } finally {
-            failed.forEach { transfers.release(it) }
+            transfers.release(failed)
         }
 
         if (batches == maxBatches) {
