@@ -26,6 +26,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import org.example.api.randomUuid
+import java.time.temporal.ChronoUnit
 
 class PaymentApiIntegrationTest : LedgerApiIntegrationTestSupport() {
 
@@ -202,6 +203,26 @@ class PaymentApiIntegrationTest : LedgerApiIntegrationTestSupport() {
         assertEquals(0, dsl.fetchCount(PAYMENT))
         assertEquals(0, dsl.fetchCount(LEDGER_TRANSACTION))
         assertEquals(0, dsl.fetchCount(LEDGER_ENTRY))
+    }
+
+    @Test
+    fun `a replay keeps sub-microsecond precision out of the conflict check`() = testApplication {
+        application { ledgerModule(testConfig(), dsl, InMemoryMerchantRegistry(setOf(merchantId))) }
+
+        // Postgres timestamptz holds microseconds. A PSP sending nanoseconds
+        // used to make every retry look like a different event.
+        val nanos = Instant.now()
+            .minus(1, ChronoUnit.HOURS)
+            .truncatedTo(ChronoUnit.MILLIS)
+            .plusNanos(123_456_789)
+        val body = paymentBody(paymentTime = nanos)
+
+        assertEquals(HttpStatusCode.OK, send(PAYMENT_CAPTURE_ENDPOINT, body).status)
+        assertEquals(HttpStatusCode.OK, send(PAYMENT_CAPTURE_ENDPOINT, body).status)
+
+        assertEquals(1, dsl.fetchCount(PAYMENT))
+        assertEquals(1, dsl.fetchCount(LEDGER_TRANSACTION))
+        assertEquals(0, dsl.fetchCount(PROCESSING_ERROR))
     }
 
     @Test
