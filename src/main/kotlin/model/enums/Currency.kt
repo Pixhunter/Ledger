@@ -1,6 +1,6 @@
 package org.example.model.enums
 
-import org.example.model.EnumId
+import model.enums.EnumId
 
 /** EUR only for now. The ledger is already per-currency, so adding one is a new entry here. */
 enum class Currency(

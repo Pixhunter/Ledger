@@ -1,7 +1,7 @@
 package org.example.service
 
 import org.example.model.enums.Currency
-import org.example.repository.BasisPoints
+import model.BasisPoints
 import org.example.support.money
 import java.math.BigDecimal
 import java.math.RoundingMode

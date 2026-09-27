@@ -19,9 +19,6 @@ data class AppConfig(
 
         private val yaml: ObjectMapper = ObjectMapper(YAMLFactory()).registerKotlinModule()
 
-        /**
-         * File first, environment second
-         */
         fun load(path: String = System.getenv("CONFIG_FILE") ?: DEFAULT_PATH): AppConfig {
             val file = File(path)
 

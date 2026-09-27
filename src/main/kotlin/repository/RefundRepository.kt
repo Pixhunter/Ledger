@@ -13,7 +13,7 @@ import org.example.model.LedgerWrite
 import org.example.model.ProcessingError
 import org.example.model.enums.EventType
 import org.example.model.enums.ProcessingErrorCode
-import org.example.model.enumById
+import model.enums.enumById
 import org.example.model.enums.Currency
 import org.example.model.enums.HoldReason
 import org.example.model.enums.LedgerTransactionType
@@ -34,6 +34,8 @@ class RefundRepository(private val dsl: DSLContext) {
     private val log = logger<RefundRepository>()
 
     suspend fun findPayment(pspReference: String): PaymentEntity? = io {
+        log.info("Find payments for pspReference")
+
         val rows = dsl.select()
             .from(PAYMENT)
             .leftJoin(PAYMENT_HOLD)
@@ -42,10 +44,13 @@ class RefundRepository(private val dsl: DSLContext) {
             .where(PAYMENT.PSP_REFERENCE.eq(pspReference))
             .fetch()
 
-        val row = rows.firstOrNull() ?: return@io null
+        val row = rows.firstOrNull() ?: let {
+            log.info("Nothing found for pspReference")
+            return@io null
+        }
         val reference = row[PAYMENT.PSP_REFERENCE]!!
 
-        PaymentEntity(
+        val result = PaymentEntity(
             id = row[PAYMENT.ID]!!,
             pspReference = reference,
             merchantId = row[PAYMENT.MERCHANT_ID],
@@ -65,6 +70,9 @@ class RefundRepository(private val dsl: DSLContext) {
                 .toSet(),
             paymentTime = row[PAYMENT.PAYMENT_TIME]!!.toInstant(),
         )
+
+        log.info("Saved paymentId=${result.id}")
+        result
     }
 
     suspend fun insert(
@@ -72,6 +80,8 @@ class RefundRepository(private val dsl: DSLContext) {
         rawPayload: String,
         entries: (previousRefundTotal: BigDecimal) -> List<LedgerEntry>,
     ): LedgerWrite = io {
+        log.info("Insert new refund ${refund.id}")
+
         dsl.transactionResult { cfg ->
             val db = DSL.using(cfg)
 
@@ -163,9 +173,8 @@ class RefundRepository(private val dsl: DSLContext) {
 
             lines.execute()
 
-            val status =
-                if (refundedSoFar.compareTo(gross) >= 0) PaymentStatus.REFUNDED
-                else PaymentStatus.PARTIALLY_REFUNDED
+            val status = if (refundedSoFar.compareTo(gross) >= 0) PaymentStatus.REFUNDED
+            else PaymentStatus.PARTIALLY_REFUNDED
 
             db.update(PAYMENT)
                 .set(PAYMENT.STATUS, status.id)

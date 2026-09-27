@@ -1,10 +1,10 @@
-package org.example.repository
+package model
 
-import org.example.utils.Constants
 import org.example.model.enums.Currency
+import org.example.utils.Constants
+import org.example.utils.Sensitive
 import java.math.BigDecimal
 import java.time.LocalDate
-import org.example.utils.Sensitive
 
 data class DueTransfer(
     val kind: TransferKind,

@@ -22,18 +22,19 @@ import org.example.repository.TaxRemittanceRepository
 import org.example.repository.BalancesRepository
 import org.example.repository.MerchantRepository
 import org.example.repository.PaymentRepository
+import repository.store.PaymentStore
 import org.example.repository.PayoutRepository
 import org.example.repository.ProcessingErrorRepository
 import org.example.repository.RefundRepository
 import org.example.service.MerchantRegistry
 import org.example.service.PaymentService
 import org.example.service.RefundService
-import org.example.repository.BasisPoints
+import model.BasisPoints
 import org.example.service.TaxRates
 import org.jooq.DSLContext
 import org.example.api.adapter.AcceptingTransferClient
 import org.example.service.scheduled.DisbursementJob
-import org.example.repository.TransferKind
+import model.TransferKind
 import io.ktor.server.routing.routing
 import org.example.api.DtoMapper.rejected
 import org.example.config.AppConfig
@@ -46,17 +47,19 @@ fun Application.ledgerModule(
     config: AppConfig,
     dsl: DSLContext,
     merchants: MerchantRegistry = MerchantRepository(dsl),
+    paymentStore: PaymentStore = PaymentRepository(dsl),
 ) {
     val signature = PspSignature(config.psp.secret, config.psp.allowSecretHeader)
     if (config.psp.allowSecretHeader) {
         log.warn("psp.allowSecretHeader is ON - the shared secret is accepted in place of a signature")
     }
+
     if (!signature.enabled) {
         log.error("no psp.secret: every request will be rejected")
     }
 
     val payments = PaymentService(
-        payments = PaymentRepository(dsl),
+        payments = paymentStore,
         rates = TaxRates(),
         merchants = merchants,
         feeRate = BasisPoints(config.mor.feeBasisPoints),
@@ -98,6 +101,8 @@ fun Application.ledgerModule(
         taxCalculation, taxDisbursement, taxMonitor,
     ).start(this)
 
+    log.info("Successfully started payment calculation")
+
     routing {
         // Production API, described by api/api.yaml.
         LedgerController(payments, refunds, processingErrors, signature).routes(this)
@@ -106,6 +111,9 @@ fun Application.ledgerModule(
         // Dev API, described by api/dev-api.yaml. Separate surface, separate spec.
         DevController(payoutCalculation, payoutDisbursement, taxCalculation, taxDisbursement).routes(this)
 
-        DocsController(config.server).routes(this)
+        DocsController().routes(this)
     }
+    log.info("Successfully started API")
+
+    log.info("Successfully started ledger")
 }

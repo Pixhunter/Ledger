@@ -18,19 +18,20 @@ import org.example.api.generated.model.MerchantBalancesDto
 import org.example.api.generated.model.TaxBalanceDto
 import org.example.model.enums.Currency
 import org.example.repository.BalancesRepository
+import org.example.utils.logger
 
 /**
  * The finance-facing half of the production API. Owns its own routes: query
  * strings are parsed here, so nothing forwards them in from a routing layer.
  */
 class BalancesController(private val balances: BalancesRepository) {
+    private val log = logger<BalancesController>()
 
     fun routes(route: Route) = with(route) {
-        // Read-only reports. Not PSP endpoints, so no signature: production
-        // needs its own auth for the finance client.
         get("/v1/balances/tax") {
+            log.info("Got request to get tax balances")
             call.respond(
-                taxBalance(
+                getTaxBalance(
                     country = call.request.queryParameters["country"]
                         ?: throw IllegalArgumentException("country is required"),
                     from = call.request.queryParameters["from"],
@@ -40,8 +41,9 @@ class BalancesController(private val balances: BalancesRepository) {
         }
 
         get("/v1/balances/merchants") {
+            log.info("Got request to get merchant balances")
             call.respond(
-                merchantBalances(
+                getMerchantBalances(
                     merchantIds = call.request.queryParameters.getAll("merchantId").orEmpty(),
                     date = call.request.queryParameters["date"],
                     asOf = call.request.queryParameters["asOf"],
@@ -52,13 +54,13 @@ class BalancesController(private val balances: BalancesRepository) {
         }
     }
 
-    private suspend fun taxBalance(country: String, from: String?, to: String?): TaxBalanceDto {
+    private suspend fun getTaxBalance(country: String, from: String?, to: String?): TaxBalanceDto {
         val start = from?.takeIf { it.isNotBlank() }?.toInstant("from")
         val end = to?.takeIf { it.isNotBlank() }?.toInstant("to") ?: Instant.now()
 
         require(start == null || start.isBefore(end)) { "from must be before to" }
 
-        val balance = balances.taxBalance(country.toCountry("country"), start, end)
+        val balance = balances.getTaxBalanceForCountry(country.toCountry("country"), start, end)
 
         return TaxBalanceDto(
             country = balance.country,
@@ -72,7 +74,7 @@ class BalancesController(private val balances: BalancesRepository) {
         )
     }
 
-    private suspend fun merchantBalances(
+    private suspend fun getMerchantBalances(
         merchantIds: List<String>,
         date: String?,
         asOf: String?,
@@ -87,13 +89,8 @@ class BalancesController(private val balances: BalancesRepository) {
         val size = limit?.takeIf { it.isNotBlank() }?.toIntIn("limit", 1..MAX_PAGE_LIMIT) ?: DEFAULT_PAGE_LIMIT
         val cutoff = asOf?.takeIf { it.isNotBlank() }?.toInstant("asOf") ?: Instant.now()
 
-        // A past day is answered from the nightly snapshot: one indexed row,
-        // and the number the payout job actually acted on.
-        // One row beyond the page tells us whether a next page exists, so a
-        // final page of exactly `size` rows does not hand out a cursor that
-        // leads nowhere.
-        val fetched = if (day == null) balances.merchantBalances(ids, cutoff, cursor, size + 1)
-        else balances.merchantBalancesOn(ids, day, cursor, size + 1)
+        val fetched = if (day == null) balances.getMerchantBalances(ids, cutoff, cursor, size + 1)
+        else balances.getMerchantBalancesOnDate(ids, day, cursor, size + 1)
 
         val views = fetched.take(size)
         val hasMore = fetched.size > size

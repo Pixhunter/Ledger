@@ -1,4 +1,4 @@
-package org.example.repository
+package repository.store
 
 import org.example.model.ProcessingError
 

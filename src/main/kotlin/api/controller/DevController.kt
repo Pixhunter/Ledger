@@ -9,6 +9,7 @@ import org.example.service.scheduled.DisbursementJob
 import org.example.service.scheduled.PayoutCalculationJob
 import org.example.service.scheduled.TaxRemittanceCalculationJob
 import org.example.utils.Constants.Jobs.REPORTING_ZONE
+import org.example.utils.logger
 import java.math.BigDecimal
 import java.time.LocalDate
 
@@ -25,8 +26,12 @@ class DevController(
     private val taxCalculation: TaxRemittanceCalculationJob,
     private val taxDisbursement: DisbursementJob,
 ) {
+    private val log = logger<DevController>()
+
     fun routes(route: Route) = with(route) {
         post("/v1/payouts/compute") {
+            log.info("Got request to compute payouts for the merchants")
+
             val today = LocalDate.now(REPORTING_ZONE)
             val computed = payoutCalculation.run(today)
 
@@ -49,10 +54,13 @@ class DevController(
         }
 
         post("/v1/payouts/send") {
+            log.info("Got request to send payouts for the merchants")
             call.respond(HttpStatusCode.OK, SentDto(payoutDisbursement.run()))
         }
 
         post("/v1/tax-remittances/compute") {
+            log.info("Got request to compute payouts for the taxes")
+
             val period = LocalDate.now(REPORTING_ZONE).withDayOfMonth(1)
             val computed = taxCalculation.run(period)
 
@@ -75,6 +83,7 @@ class DevController(
         }
 
         post("/v1/tax-remittances/send") {
+            log.info("Got request to send payouts for the taxes")
             call.respond(HttpStatusCode.OK, SentDto(taxDisbursement.run()))
         }
     }
@@ -82,6 +91,9 @@ class DevController(
     private fun <T> List<T>.total(amount: (T) -> BigDecimal): String =
         fold(BigDecimal.ZERO) { sum, it -> sum + amount(it) }.toPlainString()
 }
+
+// TODO remove this class - that's for testing - not for real prod
+//  based on it this dto didn't  generate
 
 @Serializable
 private data class SentDto(val sent: Int)

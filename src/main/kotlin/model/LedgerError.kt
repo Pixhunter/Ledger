@@ -1,4 +1,4 @@
-package org.example.service
+package model
 
 import org.example.model.enums.ProcessingErrorCode
 

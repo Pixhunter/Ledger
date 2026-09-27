@@ -1,6 +1,6 @@
 package org.example.model.enums
 
-import org.example.model.EnumId
+import model.enums.EnumId
 
 enum class TaxCategory(override val id: Short) : EnumId {
     STANDARD(1),

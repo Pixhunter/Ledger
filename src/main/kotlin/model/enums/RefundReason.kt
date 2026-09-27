@@ -1,6 +1,6 @@
 package org.example.model.enums
 
-import org.example.model.EnumId
+import model.enums.EnumId
 
 enum class RefundReason(override val id: Short) : EnumId {
     DUPLICATE(1),

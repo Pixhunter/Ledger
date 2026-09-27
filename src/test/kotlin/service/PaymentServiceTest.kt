@@ -11,8 +11,9 @@ import org.example.model.enums.HoldReason
 import org.example.model.enums.PaymentPurpose
 import org.example.model.enums.PaymentStatus
 import org.example.model.enums.ProcessingErrorCode
-import org.example.repository.PaymentStore
-import org.example.repository.BasisPoints
+import repository.store.PaymentStore
+import model.BasisPoints
+import model.LedgerResult
 import org.example.support.money
 import java.math.BigDecimal
 import java.time.Instant

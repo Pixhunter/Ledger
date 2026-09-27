@@ -1,9 +1,9 @@
 package org.example.service.scheduled
 
 import kotlinx.coroutines.runBlocking
-import org.example.repository.DueTransfer
-import org.example.repository.TransferKind
-import org.example.repository.TransferResult
+import model.DueTransfer
+import model.TransferKind
+import model.TransferResult
 import org.example.support.FakeTransferStore
 import org.example.support.RecordingTransferClient
 import java.math.BigDecimal
@@ -66,5 +66,27 @@ class DisbursementJobTest {
 
         assertEquals(1, DisbursementJob(TransferKind.TAX, store, client).run())
         assertEquals(listOf("tax-ES-$date"), client.references)
+    }
+
+    @Test
+    fun `all due transfers are drained across multiple batches`() = runBlocking {
+        val transfers = List(5) { index ->
+            payout().copy(key = UUID.randomUUID().toString(), amount = BigDecimal("${index + 1}.00"))
+        }
+        val store = FakeTransferStore(transfers)
+        val client = RecordingTransferClient()
+
+        val sent = DisbursementJob(
+            kind = TransferKind.PAYOUT,
+            transfers = store,
+            client = client,
+            batchSize = 2,
+            maxBatches = 10,
+        ).run()
+
+        assertEquals(5, sent)
+        assertEquals(5, store.marked.size)
+        assertEquals(5, client.sent.size)
+        assertEquals(4, store.dueCalls) // 2 + 2 + 1 + empty
     }
 }

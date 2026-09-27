@@ -8,7 +8,6 @@ import io.ktor.server.response.respondText
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.get
 import kotlinx.serialization.Serializable
-import org.example.config.ServerConfig
 import org.example.utils.Constants.Dev.SERVERS_BLOCK
 import java.io.File
 
@@ -16,7 +15,7 @@ import java.io.File
  * Health and the Swagger UI over both specs. Not part of either API contract -
  * this is how the two contracts are read.
  */
-class DocsController(private val server: ServerConfig) {
+class DocsController {
 
     fun routes(route: Route) = with(route) {
         get("/health") { call.respond(HttpStatusCode.OK, HealthDto("UP")) }
@@ -31,9 +30,8 @@ class DocsController(private val server: ServerConfig) {
     }
 
     /**
-     * The specs carry no servers block, so Swagger's "Try it out" would post to
-     * whatever served the page - the IDE's preview server, not the app. The
-     * block is injected here from the port the app is actually listening on.
+     * A relative server keeps Swagger on the same origin as this application.
+     * This also avoids CORS failures when localhost is opened by another alias.
      */
     private suspend fun ApplicationCall.respondSpec(spec: File, inject: Boolean = true) {
         if (!spec.isFile) {
@@ -43,7 +41,7 @@ class DocsController(private val server: ServerConfig) {
 
         val body = if (!inject) spec.readText() else
             SERVERS_BLOCK.replace(spec.readText(), "").trimEnd() +
-                "\n\nservers:\n  - url: ${server.effectivePublicUrl}\n"
+                "\n\nservers:\n  - url: /\n"
 
         respondText(body, ContentType.parse("application/yaml"))
     }
@@ -60,13 +58,20 @@ class DocsController(private val server: ServerConfig) {
               <body>
                 <div id="ui"></div>
                 <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+                <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-standalone-preset.js"></script>
                 <script>
                   window.ui = SwaggerUIBundle({
                     dom_id: "#ui",
                     urls: [
-                      { name: "PSP API", url: "/openapi.yaml" },
+                      { name: "Main API", url: "/openapi.yaml" },
                       { name: "Dev API", url: "/dev-api.yaml" }
-                    ]
+                    ],
+                    "urls.primaryName": "Main API",
+                    presets: [
+                      SwaggerUIBundle.presets.apis,
+                      SwaggerUIStandalonePreset
+                    ],
+                    layout: "StandaloneLayout"
                   });
                 </script>
               </body>

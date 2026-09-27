@@ -1,7 +1,6 @@
-package org.example.service
+package model
 
 import org.example.model.enums.PaymentStatus
-import org.example.model.enums.ProcessingErrorCode
 
 sealed interface LedgerResult {
     data class Recorded(

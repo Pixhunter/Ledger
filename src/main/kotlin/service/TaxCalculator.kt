@@ -2,7 +2,7 @@ package org.example.service
 
 import org.example.model.Money
 import org.example.model.enums.Currency
-import org.example.repository.BasisPoints
+import model.BasisPoints
 import org.example.utils.Constants
 import java.math.BigDecimal
 import java.math.RoundingMode

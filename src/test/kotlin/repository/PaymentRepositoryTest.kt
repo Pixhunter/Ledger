@@ -10,7 +10,7 @@ import org.example.model.LedgerEntry
 import org.example.model.PaymentEntity
 import org.example.model.ProcessingError
 import org.example.model.LedgerWrite
-import org.example.model.enumById
+import model.enums.enumById
 import org.example.model.enums.Currency
 import org.example.model.enums.EventType
 import org.example.model.enums.HoldReason

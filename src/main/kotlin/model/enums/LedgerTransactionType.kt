@@ -1,6 +1,6 @@
 package org.example.model.enums
 
-import org.example.model.EnumId
+import model.enums.EnumId
 
 enum class LedgerTransactionType(override val id: Short) : EnumId {
     CAPTURE(1),

@@ -1,8 +1,8 @@
-package org.example.repository
+package repository.store
 
 import org.example.model.MerchantBalance
-import java.time.LocalDate
 import java.time.Instant
+import java.time.LocalDate
 import java.util.UUID
 
 interface PayoutStore {

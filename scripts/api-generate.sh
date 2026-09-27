@@ -4,7 +4,8 @@
 # The spec is the single source of truth. Hand-written DTOs drift from it
 # silently - a renamed field only fails at runtime, against a real PSP.
 #
-# src/generated is gitignored, so a clean clone must run this (see rebuild-all.sh).
+# Generated sources are committed. Run this after changing the API schemas,
+# then commit the refreshed output.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."

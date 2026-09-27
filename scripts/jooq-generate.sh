@@ -5,7 +5,8 @@
 # exist first. ./scripts/rebuild-all.sh does the whole chain; run this alone
 # only when the schema is already current.
 #
-# src/generated is gitignored, so a clean clone must run this.
+# Generated sources are committed. Run this after changing a migration, then
+# commit the refreshed output.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."

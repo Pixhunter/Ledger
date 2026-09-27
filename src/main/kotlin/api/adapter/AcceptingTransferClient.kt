@@ -1,9 +1,8 @@
 package org.example.api.adapter
 
-import org.example.repository.DueTransfer
-import org.example.repository.TransferClient
-import org.example.repository.TransferResult
-import org.example.utils.maskTail
+import model.DueTransfer
+import model.TransferClient
+import model.TransferResult
 import org.example.utils.logger
 
 /**
@@ -16,9 +15,8 @@ class AcceptingTransferClient : TransferClient {
 
     override suspend fun send(transfer: DueTransfer): TransferResult {
         log.info(
-            "event=transfer kind={} ref={} amount={} currency={} destination={}",
-            transfer.kind, transfer.reference, transfer.amount, transfer.currency,
-            transfer.destination.reveal().maskTail(),
+            "Transfer money for ${transfer.kind} ref=${transfer.reference}} " +
+                    "amount=${transfer.amount} currency=${transfer.currency}"
         )
         return TransferResult.Accepted("mock-${transfer.reference}")
     }

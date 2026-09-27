@@ -99,6 +99,9 @@ object Constants {
         /** Rows one disbursement worker claims per pass. */
         const val CLAIM_LIMIT = 100
 
+        /** Safety bound: one run drains at most 10,000 transfers. */
+        const val MAX_DISBURSEMENT_BATCHES = 100
+
         /** A claim older than this is treated as a dead worker and retried. */
         const val CLAIM_TIMEOUT_MINUTES = 5
     }

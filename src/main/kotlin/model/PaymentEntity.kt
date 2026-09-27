@@ -8,13 +8,6 @@ import java.math.BigDecimal
 import java.time.Instant
 import java.util.UUID
 
-/**
- * A payment as it will be stored: the business fact, fully decided.
- *
- * Everything except status is frozen at capture - amounts, rate, category,
- * country. A rate change next year, or a merchant moving country, must never
- * rewrite what was actually charged.
- */
 data class PaymentEntity(
     val id: UUID,
     val pspReference: String,

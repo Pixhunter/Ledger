@@ -1,8 +1,3 @@
-# Postgres only. The application itself runs natively - ./gradlew run, or the
-# run button in IntelliJ - and applies its own migrations at startup.
-#
-# Postgres is in a container purely so the project needs no local install and
-# the version is pinned. Point DB_URL at any Postgres you prefer instead.
 services:
   postgres:
     image: postgres:17-alpine
@@ -20,6 +15,22 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+
+  app:
+    build: .
+    image: ledger:local
+    ports:
+      - "8081:8081"
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/ledger
+      DB_USER: ledger
+      DB_PASSWORD: ledger
+      SERVER_PUBLIC_URL: http://localhost:8081
+      PSP_SECRET: dev-psp-secret-change-me
+      PSP_ALLOW_SECRET_HEADER: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
 
 volumes:
   ledger-pgdata:

@@ -1,4 +1,4 @@
-package org.example.repository
+package repository.store
 
 import org.example.model.TaxLiability
 import java.math.BigDecimal

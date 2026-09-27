@@ -13,7 +13,7 @@ import org.example.model.PaymentEntity
 import org.example.model.ProcessingError
 import org.example.model.enums.EventType
 import org.example.model.enums.ProcessingErrorCode
-import org.example.model.enumById
+import model.enums.enumById
 import org.example.model.enums.PaymentStatus
 import org.example.model.enums.TaxCategory
 import org.jooq.DSLContext
@@ -23,6 +23,7 @@ import java.util.UUID
 import java.math.BigDecimal
 import org.example.api.randomUuid
 import org.example.utils.logger
+import repository.store.PaymentStore
 
 class PaymentRepository(private val dsl: DSLContext) : PaymentStore {
 
@@ -34,21 +35,15 @@ class PaymentRepository(private val dsl: DSLContext) : PaymentStore {
         rawPayload: String,
         errors: List<ProcessingError>,
     ): LedgerWrite = io {
-        // The invariant, checked before it reaches the database. Per currency,
-        // because summing across currencies is meaningless. A table CHECK
-        // cannot see sibling rows, so this is where it lives.
+        log.info("Insert payment for merchantId=${payment.merchantId} paymentId=${payment.id} paymentTime=${payment.paymentTime}")
+
         entries.groupBy { it.currency }.forEach { (currency, group) ->
             val sum = group.fold(BigDecimal.ZERO) { total, entry -> total + entry.amount }
-            require(sum.signum() == 0) { "entries for $currency do not sum to zero: $sum" }
+            require(sum.signum() == 0) { "Entries for $currency do not sum to zero for payment: $sum" }
         }
 
         dsl.transactionResult { cfg ->
             val db = DSL.using(cfg)
-
-            // ON CONFLICT DO NOTHING rather than SELECT-then-INSERT: under
-            // concurrent PSP retries the read-then-write version lets two
-            // callers both see "not there" and both insert. The unique index
-            // cannot be raced.
             val inserted: UUID? = db
                 .insertInto(PAYMENT)
                 .set(PAYMENT.ID, payment.id)
@@ -73,17 +68,12 @@ class PaymentRepository(private val dsl: DSLContext) : PaymentStore {
                 ?.value1()
 
             if (inserted == null) {
-                // Replay. Read back what we decided the first time and answer
-                // identically - the PSP must never get two different answers
-                // for one payment.
                 val existing = db
                     .selectFrom(PAYMENT)
                     .where(PAYMENT.PSP_REFERENCE.eq(payment.pspReference))
                     .fetchOne()
                     ?: error("psp_reference ${payment.pspReference} conflicted but cannot be read back")
 
-                // A replay is only a replay if it says the same thing. The unique
-                // index proves the reference was seen, not that the money matches.
                 val sameEvent = existing.merchantId == payment.merchantId &&
                         existing.gross.compareTo(payment.gross) == 0 &&
                         existing.tax.compareTo(payment.tax) == 0 &&
@@ -109,12 +99,14 @@ class PaymentRepository(private val dsl: DSLContext) : PaymentStore {
                             detail = "same pspReference received with different immutable payment data",
                         ),
                     )
+                    log.info("Same pspReference received with different immutable payment data - failed to save new payment")
+
                     return@transactionResult LedgerWrite.Conflict(
                         "same pspReference received with different immutable payment data"
                     )
                 }
 
-                log.info("outcome=replay nothing written")
+                log.info("Replay payment - nothing written")
 
                 return@transactionResult LedgerWrite.Duplicate(
                     enumById<PaymentStatus>(existing.status)
@@ -133,8 +125,6 @@ class PaymentRepository(private val dsl: DSLContext) : PaymentStore {
                 holds.execute()
             }
 
-            // One money event, then its lines. Type and payment id live on the
-            // transaction so they are not repeated on every entry.
             val transactionId = randomUuid()
 
             db.insertInto(LEDGER_TRANSACTION)
@@ -143,10 +133,6 @@ class PaymentRepository(private val dsl: DSLContext) : PaymentStore {
                 .set(LEDGER_TRANSACTION.PAYMENT_ID, payment.id)
                 .execute()
 
-            // One statement for all lines. Built without reassigning the
-            // step: jOOQ's values() mutates and returns the same builder, and
-            // reassigning a var here makes Kotlin fall back to the
-            // values(Field...) overload with a baffling error.
             val insert = db.insertInto(
                 LEDGER_ENTRY,
                 LEDGER_ENTRY.TRANSACTION_ID,
@@ -173,10 +159,7 @@ class PaymentRepository(private val dsl: DSLContext) : PaymentStore {
             insertProcessingErrors(db, errors)
 
             log.info(
-                "event=stored status={} held={} entries={}",
-                payment.status,
-                payment.holdReasons.takeIf { it.isNotEmpty() } ?: "-",
-                errors.size,
+                "Stored status=${payment.status} held=${payment.holdReasons.takeIf { it.isNotEmpty() } ?: "-"} entries=${errors.size}"
             )
 
             LedgerWrite.Inserted(payment.status)

@@ -1,5 +1,7 @@
 package org.example.service
 
+import model.LedgerError
+import model.LedgerResult
 import org.example.model.LedgerWrite
 import org.example.model.RefundEntity
 import org.example.model.RefundModel
@@ -18,7 +20,7 @@ class RefundService(
 
     suspend fun createRefund(request: RefundModel, rawPayload: String = "{}"): LedgerResult {
         if (!request.success) {
-            log.info("outcome=psp_failed nothing stored")
+            log.info("Psp failed -> nothing stored")
             return LedgerResult.NothingToRecord
         }
 
@@ -34,7 +36,7 @@ class RefundService(
                     ProcessingErrorCode.INVALID_DATE,
                     request.refundReference,
                     "refundedAt ${request.refundedAt}, payment at ${payment.paymentTime}, " +
-                        "now ${clock.instant()}, allowedFutureDrift=${Constants.Dates.REFUND_MAX_FUTURE_DRIFT}",
+                            "now ${clock.instant()}, allowedFutureDrift=${Constants.Dates.REFUND_MAX_FUTURE_DRIFT}",
                 )
             )
         }
@@ -72,7 +74,7 @@ class RefundService(
                     ProcessingErrorCode.OVER_REFUND,
                     request.refundReference,
                     "refunds total ${write.refundedSoFar} against gross ${write.gross}, " +
-                        "excess booked to SUSPENSE",
+                            "excess booked to SUSPENSE",
                 ),
             )
         }

@@ -1,12 +1,12 @@
 package org.example.api
 
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.example.utils.Constants
 import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
 import kotlinx.coroutines.slf4j.MDCContext
+import org.example.database.Database
 
 fun String.toUuid(field: String): UUID =
     runCatching { UUID.fromString(this) }
@@ -33,9 +33,12 @@ fun String.toIntIn(field: String, range: IntRange): Int {
     return value
 }
 
-/** One place to change if ids ever move to UUIDv7 for index locality. */
 fun randomUuid(): UUID = UUID.randomUUID()
 
-/** Runs blocking JDBC work away from Ktor's request threads. */
+/**
+ * Runs blocking JDBC work off Ktor's request threads, on a dispatcher capped at
+ * the connection-pool size, so waiting for a connection queues in the scheduler
+ * instead of blocking a thread. See [Database.jdbc].
+ */
 internal suspend inline fun <R> io(crossinline block: () -> R): R =
-    withContext(Dispatchers.IO + MDCContext()) { block() }
+    withContext(Database.jdbc + MDCContext()) { block() }

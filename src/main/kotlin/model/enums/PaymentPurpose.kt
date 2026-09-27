@@ -1,6 +1,6 @@
 package org.example.model.enums
 
-import org.example.model.EnumId
+import model.enums.EnumId
 
 enum class PaymentPurpose(override val id: Short) : EnumId {
     PSP(1),

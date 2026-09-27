@@ -1,7 +1,7 @@
 package org.example.service
 
 import org.example.model.enums.Currency
-import org.example.repository.BasisPoints
+import model.BasisPoints
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
@@ -23,8 +23,6 @@ class TaxRates(private val rates: List<TaxRate> = EU_STANDARD_HISTORY) {
             .filter { it.country.equals(country, true) && it.currency == currency && it.validFrom <= paymentDate }
             .maxByOrNull { it.validFrom }
     }
-
-    fun supported(): Set<String> = rates.mapTo(mutableSetOf()) { it.country }
 
     companion object {
         private val HISTORY_START = LocalDate.of(2021, 1, 1)

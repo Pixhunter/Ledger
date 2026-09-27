@@ -3,17 +3,12 @@ package org.example.api.security
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 import org.example.utils.Constants
+import org.example.utils.logger
 
 /**
  * HMAC over the raw body, as every PSP webhook does.
  *
- * This endpoint is a trust boundary: whoever can reach it can invent money.
- * Without a signature check, a leaked URL is a leaked ledger.
- *
- * Two details that are the whole point:
- *  - the RAW bytes are signed, not a re-serialised object; re-encoding
- *    changes whitespace and key order and the signature stops matching
- *  - constant-time comparison, so an attacker cannot time-probe the digest
+ * Small security - TODO - add mode defence
  *
  * Fails closed: no secret means every request is rejected.
  */
@@ -21,11 +16,15 @@ class PspSignature(
     private val secret: String?,
     private val allowSecretHeader: Boolean = false,
 ) {
+    private val log = logger<PspSignature>()
 
     val enabled: Boolean get() = !secret.isNullOrBlank()
 
     fun verify(rawBody: ByteArray, header: String?): Boolean {
-        if (!enabled || header.isNullOrBlank()) return false
+        if (!enabled || header.isNullOrBlank()) {
+            log.info("Verifying signature FAILED for ${rawBody.size} bytes")
+            return false
+        }
 
         // Swagger cannot compute an HMAC over the body it is about to send, so
         // in dev the header may be the shared secret itself. A missing or wrong

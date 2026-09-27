@@ -1,6 +1,5 @@
 .gradle
 build/
-src/generated
 shelved
 Claude outputs
 !gradle/wrapper/gradle-wrapper.jar
