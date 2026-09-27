@@ -79,9 +79,9 @@ object Constants {
     object Jobs {
         val REPORTING_ZONE: ZoneId = ZoneId.of("Europe/London")
 
-        val PAYOUT_CALCULATION_AT: LocalTime = LocalTime.MIDNIGHT
-        val PAYOUT_DISBURSEMENT_AT: LocalTime = LocalTime.of(1, 0)
-        val TAX_MONITOR_AT: LocalTime = LocalTime.of(1, 30)
+        val PAYOUT_CALCULATION_AT: LocalTime = LocalTime.of(1, 0)
+        val PAYOUT_DISBURSEMENT_AT: LocalTime = LocalTime.of(1, 30)
+        val TAX_MONITOR_AT: LocalTime = LocalTime.of(2, 30)
         val TAX_CALCULATION_AT: LocalTime = LocalTime.of(2, 0)
         val TAX_DISBURSEMENT_AT: LocalTime = LocalTime.of(3, 0)
 

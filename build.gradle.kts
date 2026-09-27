@@ -61,6 +61,9 @@ dependencies {
     testImplementation("io.ktor:ktor-server-test-host:$ktorVersion")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:$coroutinesVersion")
     testImplementation("org.testcontainers:postgresql:$testcontainersVersion")
+    // runTestWithRealTime: the load test measures wall-clock time, so it must
+    // not run on the virtual-time test dispatcher.
+    testImplementation("io.ktor:ktor-test-dispatcher:$ktorVersion")
 
     jooqGenerator("org.jooq:jooq-codegen:$jooqVersion")
     jooqGenerator("org.jooq:jooq-meta:$jooqVersion")
@@ -191,6 +194,42 @@ application {
     mainClass.set("org.example.MainKt")
 }
 
+/**
+ * Testcontainers looks for DOCKER_HOST, then /var/run/docker.sock. Colima and
+ * Rancher Desktop put their socket under the user's home instead, so the lookup
+ * fails and every database test dies with "Could not find a valid Docker
+ * environment". Docker Desktop and CI need none of this - the list below finds
+ * nothing and this is a no-op.
+ *
+ * The socket override tells Ryuk, which runs inside the VM, where the socket is
+ * from ITS point of view, which is always /var/run/docker.sock.
+ */
+fun Test.useLocalDockerSocket() {
+    if (System.getenv("DOCKER_HOST") != null) return
+
+    val home = System.getProperty("user.home")
+    val socket = listOf(
+        "$home/.colima/default/docker.sock",
+        "$home/.colima/docker.sock",
+        "$home/.rd/docker.sock",
+        "$home/.docker/run/docker.sock",
+    ).firstOrNull { File(it).exists() } ?: return
+
+    environment("DOCKER_HOST", "unix://$socket")
+    environment("TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE", "/var/run/docker.sock")
+
+    // Without this docker-java falls back to API 1.32 and Colima's daemon
+    // rejects anything below 1.40. 1.41 is Docker 20.10, old enough to be safe
+    // everywhere and new enough to be accepted.
+    if (System.getenv("DOCKER_API_VERSION") == null) {
+        environment("DOCKER_API_VERSION", "1.41")
+        environment("API_VERSION", "1.41")
+        systemProperty("api.version", "1.41")
+    }
+
+    logger.lifecycle("testcontainers docker socket: $socket")
+}
+
 tasks.test {
     useJUnitPlatform()
 
@@ -204,45 +243,76 @@ tasks.test {
         showStackTraces = true
     }
 
-    // One JVM, one container. A second fork would start a second Postgres,
-    // and on a laptop that is how a test run turns into a swap storm. Classes
-    // that need the database queue behind each other instead; the container
-    // starts once for the whole run and Ryuk removes it at exit.
+    // One JVM, one container. A second fork would start a second Postgres, and
+    // on a laptop that is how a test run turns into a swap storm. Classes that
+    // need the database queue behind each other instead; the container starts
+    // once for the whole run and Ryuk removes it at exit.
     maxParallelForks = 1
     forkEvery = 0
     systemProperty("junit.jupiter.execution.parallel.enabled", "false")
 
-    // Testcontainers looks for DOCKER_HOST, then /var/run/docker.sock. Colima
-    // and Rancher Desktop put their socket under the user's home instead, so
-    // the lookup fails and every database test dies with "Could not find a
-    // valid Docker environment". Docker Desktop needs none of this - the list
-    // below finds nothing and the block is a no-op.
-    //
-    // The socket override tells Ryuk, which runs inside the VM, where the
-    // socket is from ITS point of view, which is always /var/run/docker.sock.
-    if (System.getenv("DOCKER_HOST") == null) {
-        val home = System.getProperty("user.home")
-        val socket = listOf(
-            "$home/.colima/default/docker.sock",
-            "$home/.colima/docker.sock",
-            "$home/.rd/docker.sock",
-            "$home/.docker/run/docker.sock",
-        ).firstOrNull { File(it).exists() }
+    useLocalDockerSocket()
+}
 
-        if (socket != null) {
-            environment("DOCKER_HOST", "unix://$socket")
-            environment("TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE", "/var/run/docker.sock")
+/**
+ * The benchmark lives in its own source set so it is never part of `test` or
+ * `check`: it runs for minutes and starts its own Postgres. It compiles against
+ * main only - it drives the service over HTTP, like a client would.
+ */
+val loadTest: SourceSet by sourceSets.creating {
+    compileClasspath += sourceSets["main"].output
+    runtimeClasspath += output + compileClasspath
+}
 
-            // Without this docker-java falls back to API 1.32 and Colima's
-            // daemon rejects anything below 1.40. 1.41 is Docker 20.10, old
-            // enough to be safe everywhere and new enough to be accepted.
-            if (System.getenv("DOCKER_API_VERSION") == null) {
-                environment("DOCKER_API_VERSION", "1.41")
-                environment("API_VERSION", "1.41")
-                systemProperty("api.version", "1.41")
-            }
+configurations["loadTestImplementation"].extendsFrom(configurations["testImplementation"])
+configurations["loadTestRuntimeOnly"].extendsFrom(configurations["testRuntimeOnly"])
 
-            logger.lifecycle("testcontainers docker socket: $socket")
-        }
+/**
+ * Opt-in: ./gradlew mixedLoadTest
+ *
+ * The test reads system properties named load.*, and a Gradle -P flag is a
+ * project property, not a system one - so the documented -P names are mapped
+ * across here. Both spellings work:
+ *
+ *     ./gradlew mixedLoadTest -PseedPayments=1000 -PloadSeconds=10
+ *     ./gradlew mixedLoadTest -Dload.seedPayments=1000 -Dload.seconds=10
+ *
+ * Results land in load-test-results/.
+ */
+tasks.register<Test>("mixedLoadTest") {
+    group = "verification"
+    description = "Mixed capture/refund benchmark. Needs Docker. Not part of check or CI."
+
+    testClassesDirs = loadTest.output.classesDirs
+    classpath = loadTest.runtimeClasspath
+
+    useJUnitPlatform()
+    maxParallelForks = 1
+    maxHeapSize = "2g"
+
+    // A benchmark is never up to date: the point is to run it again.
+    outputs.upToDateWhen { false }
+
+    // -D pass-through.
+    System.getProperties().forEach { key, value ->
+        if (key is String && key.startsWith("load.")) systemProperty(key, value.toString())
     }
+
+    // -P pass-through, using the names src/loadTest/README.md documents.
+    mapOf(
+        "seedPayments" to "load.seedPayments",
+        "loadMerchants" to "load.merchants",
+        "loadWorkers" to "load.workers",
+        "loadSeconds" to "load.seconds",
+    ).forEach { (flag, property) ->
+        (project.findProperty(flag) as String?)?.let { systemProperty(property, it) }
+    }
+
+    testLogging {
+        events("passed", "failed")
+        exceptionFormat = TestExceptionFormat.FULL
+        showStandardStreams = true
+    }
+
+    useLocalDockerSocket()
 }

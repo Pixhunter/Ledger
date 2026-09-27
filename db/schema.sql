@@ -190,7 +190,7 @@ CREATE TABLE mor.payout (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT payout_amount_ck CHECK ((amount > (0)::numeric)),
     CONSTRAINT payout_currency_ck CHECK ((currency ~ '^[A-Z]{3}$'::text)),
-    CONSTRAINT payout_status_ck CHECK ((status = ANY (ARRAY[1, 2, 3, 4])))
+    CONSTRAINT payout_status_ck CHECK ((status = ANY (ARRAY[1, 2, 3])))
 );
 
 
@@ -279,7 +279,7 @@ CREATE TABLE mor.tax_remittance (
     CONSTRAINT tax_remittance_amount_ck CHECK ((amount > (0)::numeric)),
     CONSTRAINT tax_remittance_country_ck CHECK ((country ~ '^[A-Z]{2}$'::text)),
     CONSTRAINT tax_remittance_currency_ck CHECK ((currency ~ '^[A-Z]{3}$'::text)),
-    CONSTRAINT tax_remittance_status_ck CHECK ((status = ANY (ARRAY[1, 2, 3, 4])))
+    CONSTRAINT tax_remittance_status_ck CHECK ((status = ANY (ARRAY[1, 2, 3])))
 );
 
 

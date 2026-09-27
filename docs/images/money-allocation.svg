@@ -1,4 +1,3 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="610" viewBox="0 0 1200 610" role="img" aria-labelledby="title desc">
   <title id="title">Payment and partial refund allocation</title>
   <desc id="desc">A 100 euro payment is split into tax, MoR revenue and merchant value, followed by two possible policies for a 20 euro refund.</desc>
   <defs>

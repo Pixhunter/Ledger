@@ -202,7 +202,7 @@ CREATE TABLE mor.payout
     amount                numeric(19,4) NOT NULL,
     currency              text        NOT NULL,
     ledger_transaction_id uuid        NOT NULL REFERENCES mor.ledger_transaction (id),
-    status                smallint    NOT NULL,      -- PayoutStatus: 1 COMPUTED, 2 SENT, 3 CONFIRMED
+    status                smallint    NOT NULL,      -- PayoutStatus: 1 COMPUTED, 2 SENT, 3 PROCESSING
     psp_reference         text        NULL,          -- the PSP's id for the transfer, set when sent
     claimed_at            timestamptz NULL,
     created_at            timestamptz NOT NULL DEFAULT now(),
@@ -210,7 +210,7 @@ CREATE TABLE mor.payout
     PRIMARY KEY (merchant_id, payout_date),
 
     CONSTRAINT payout_amount_ck   CHECK (amount > 0),
-    CONSTRAINT payout_status_ck   CHECK (status IN (1, 2, 3, 4)),
+    CONSTRAINT payout_status_ck   CHECK (status IN (1, 2, 3)),
     CONSTRAINT payout_currency_ck CHECK (currency ~ '^[A-Z]{3}$')
 );
 
@@ -260,7 +260,7 @@ CREATE TABLE mor.tax_remittance
     amount                numeric(19,4) NOT NULL,
     currency              text          NOT NULL,
     ledger_transaction_id uuid          NOT NULL REFERENCES mor.ledger_transaction (id),
-    status                smallint      NOT NULL,      -- PayoutStatus: 1 COMPUTED, 2 SENT, 3 CONFIRMED
+    status                smallint      NOT NULL,      -- PayoutStatus: 1 COMPUTED, 2 SENT, 3 PROCESSING
     reference             text          NULL,          -- the authority's id for the payment
     claimed_at            timestamptz   NULL,
     created_at            timestamptz   NOT NULL DEFAULT now(),
@@ -268,7 +268,7 @@ CREATE TABLE mor.tax_remittance
     PRIMARY KEY (country, period_start),
 
     CONSTRAINT tax_remittance_amount_ck   CHECK (amount > 0),
-    CONSTRAINT tax_remittance_status_ck   CHECK (status IN (1, 2, 3, 4)),
+    CONSTRAINT tax_remittance_status_ck   CHECK (status IN (1, 2, 3)),
     CONSTRAINT tax_remittance_country_ck  CHECK (country ~ '^[A-Z]{2}$'),
     CONSTRAINT tax_remittance_currency_ck CHECK (currency ~ '^[A-Z]{3}$')
 );
