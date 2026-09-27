@@ -73,6 +73,30 @@ class PayoutAndTaxIntegrationTest : LedgerApiIntegrationTestSupport() {
         val taxJson = apiJson.parseToJsonElement(taxResponse.bodyAsText()).jsonObject
         assertEquals(1, taxJson.getValue("countries").jsonPrimitive.content.toInt())
         assertEquals(1, taxJson.getValue("remittances").jsonArray.size)
+
+        assertEquals(
+            HttpStatusCode.OK,
+            send(PAYMENT_CAPTURE_ENDPOINT, paymentBody(pspReference = "psp-second-compute")).status,
+        )
+
+        val secondPayout = client.post("/v1/payouts/compute")
+        assertEquals(HttpStatusCode.OK, secondPayout.status)
+        assertEquals(
+            1,
+            apiJson.parseToJsonElement(secondPayout.bodyAsText()).jsonObject
+                .getValue("merchants").jsonPrimitive.content.toInt(),
+        )
+
+        val secondTax = client.post("/v1/tax-remittances/compute")
+        assertEquals(HttpStatusCode.OK, secondTax.status)
+        assertEquals(
+            1,
+            apiJson.parseToJsonElement(secondTax.bodyAsText()).jsonObject
+                .getValue("countries").jsonPrimitive.content.toInt(),
+        )
+
+        assertEquals(0, dsl.selectFrom(PAYOUT).fetchSingle().amount.compareTo(money("190.00")))
+        assertEquals(0, dsl.selectFrom(TAX_REMITTANCE).fetchSingle().amount.compareTo(money("42.00")))
     }
 
     @Test

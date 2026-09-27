@@ -134,7 +134,7 @@ open class ProcessingError(
     override fun getIndexes(): List<Index> = listOf(PROCESSING_ERROR_CREATED_IDX, PROCESSING_ERROR_UK)
     override fun getPrimaryKey(): UniqueKey<ProcessingErrorRecord> = PROCESSING_ERROR_PKEY
     override fun getChecks(): List<Check<ProcessingErrorRecord>> = listOf(
-        Internal.createCheck(this, DSL.name("processing_error_code_ck"), "((error_code = ANY (ARRAY[1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12])))", true),
+        Internal.createCheck(this, DSL.name("processing_error_code_ck"), "((error_code = ANY (ARRAY[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])))", true),
         Internal.createCheck(this, DSL.name("processing_error_event_ck"), "((event_type = ANY (ARRAY[1, 2, 3, 4])))", true)
     )
     override fun `as`(alias: String): ProcessingError = ProcessingError(DSL.name(alias), this)

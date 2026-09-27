@@ -5,7 +5,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict Bql0HVZpzafUEA9AsdsOqn0ZjVvrFzub1f48qQS6tvRCL30cMC7UGDc2oSfLDGa
+\restrict FgShDcmtUO8w7ZdCSnmZzFEyFA2EZOwJWjA6yWsHbgggRMwqnKdVrPNkIAccZQw
 
 -- Dumped from database version 17.11
 -- Dumped by pg_dump version 17.11
@@ -395,17 +395,17 @@ CREATE INDEX ledger_entry_balance_idx ON mor.ledger_entry USING btree (purpose, 
 
 
 --
--- Name: ledger_entry_transaction_idx; Type: INDEX; Schema: mor; Owner: -
---
-
-CREATE INDEX ledger_entry_transaction_idx ON mor.ledger_entry USING btree (transaction_id);
-
-
---
 -- Name: ledger_entry_settlement_transaction_idx; Type: INDEX; Schema: mor; Owner: -
 --
 
 CREATE INDEX ledger_entry_settlement_transaction_idx ON mor.ledger_entry USING btree (settled_by_transaction_id) WHERE (settled_by_transaction_id IS NOT NULL);
+
+
+--
+-- Name: ledger_entry_transaction_idx; Type: INDEX; Schema: mor; Owner: -
+--
+
+CREATE INDEX ledger_entry_transaction_idx ON mor.ledger_entry USING btree (transaction_id);
 
 
 --
@@ -619,4 +619,5 @@ ALTER TABLE ONLY mor.tax_remittance
 -- PostgreSQL database dump complete
 --
 
-\unrestrict Bql0HVZpzafUEA9AsdsOqn0ZjVvrFzub1f48qQS6tvRCL30cMC7UGDc2oSfLDGa
+\unrestrict FgShDcmtUO8w7ZdCSnmZzFEyFA2EZOwJWjA6yWsHbgggRMwqnKdVrPNkIAccZQw
+

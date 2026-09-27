@@ -26,6 +26,7 @@ import org.jooq.impl.Internal
 // -------------------------------------------------------------------------
 
 val LEDGER_ENTRY_BALANCE_IDX: Index = Internal.createIndex(DSL.name("ledger_entry_balance_idx"), LedgerEntry.LEDGER_ENTRY, arrayOf(LedgerEntry.LEDGER_ENTRY.PURPOSE, LedgerEntry.LEDGER_ENTRY.PURPOSE_KEY, LedgerEntry.LEDGER_ENTRY.CURRENCY, LedgerEntry.LEDGER_ENTRY.OCCURRED_AT), false)
+val LEDGER_ENTRY_SETTLEMENT_TRANSACTION_IDX: Index = Internal.createIndex(DSL.name("ledger_entry_settlement_transaction_idx"), LedgerEntry.LEDGER_ENTRY, arrayOf(LedgerEntry.LEDGER_ENTRY.SETTLED_BY_TRANSACTION_ID), false)
 val LEDGER_ENTRY_TRANSACTION_IDX: Index = Internal.createIndex(DSL.name("ledger_entry_transaction_idx"), LedgerEntry.LEDGER_ENTRY, arrayOf(LedgerEntry.LEDGER_ENTRY.TRANSACTION_ID), false)
 val LEDGER_ENTRY_UNSETTLED_MERCHANT_IDX: Index = Internal.createIndex(DSL.name("ledger_entry_unsettled_merchant_idx"), LedgerEntry.LEDGER_ENTRY, arrayOf(LedgerEntry.LEDGER_ENTRY.PURPOSE, LedgerEntry.LEDGER_ENTRY.PURPOSE_KEY, LedgerEntry.LEDGER_ENTRY.CURRENCY, LedgerEntry.LEDGER_ENTRY.ID), false)
 val LEDGER_TRANSACTION_PAYMENT_IDX: Index = Internal.createIndex(DSL.name("ledger_transaction_payment_idx"), LedgerTransaction.LEDGER_TRANSACTION, arrayOf(LedgerTransaction.LEDGER_TRANSACTION.PAYMENT_ID), false)
@@ -34,11 +35,13 @@ val PAYMENT_HOLD_ACTIVE_IDX: Index = Internal.createIndex(DSL.name("payment_hold
 val PAYMENT_MERCHANT_IDX: Index = Internal.createIndex(DSL.name("payment_merchant_idx"), Payment.PAYMENT, arrayOf(Payment.PAYMENT.MERCHANT_ID, Payment.PAYMENT.PAYMENT_TIME), false)
 val PAYMENT_PSP_REFERENCE_UK: Index = Internal.createIndex(DSL.name("payment_psp_reference_uk"), Payment.PAYMENT, arrayOf(Payment.PAYMENT.PSP_REFERENCE), true)
 val PAYOUT_DATE_IDX: Index = Internal.createIndex(DSL.name("payout_date_idx"), Payout.PAYOUT, arrayOf(Payout.PAYOUT.PAYOUT_DATE), false)
-val PAYOUT_DUE_IDX: Index = Internal.createIndex(DSL.name("payout_due_idx"), Payout.PAYOUT, arrayOf(Payout.PAYOUT.STATUS, Payout.PAYOUT.PAYOUT_DATE), false)
+val PAYOUT_DUE_IDX: Index = Internal.createIndex(DSL.name("payout_due_idx"), Payout.PAYOUT, arrayOf(Payout.PAYOUT.STATUS, Payout.PAYOUT.CLAIMED_AT, Payout.PAYOUT.PAYOUT_DATE, Payout.PAYOUT.MERCHANT_ID), false)
+val PAYOUT_LEDGER_TRANSACTION_UK: Index = Internal.createIndex(DSL.name("payout_ledger_transaction_uk"), Payout.PAYOUT, arrayOf(Payout.PAYOUT.LEDGER_TRANSACTION_ID), true)
 val PROCESSING_ERROR_CREATED_IDX: Index = Internal.createIndex(DSL.name("processing_error_created_idx"), ProcessingError.PROCESSING_ERROR, arrayOf(ProcessingError.PROCESSING_ERROR.CREATED_AT), false)
 val PROCESSING_ERROR_UK: Index = Internal.createIndex(DSL.name("processing_error_uk"), ProcessingError.PROCESSING_ERROR, arrayOf(ProcessingError.PROCESSING_ERROR.EVENT_TYPE, ProcessingError.PROCESSING_ERROR.EXTERNAL_REFERENCE, ProcessingError.PROCESSING_ERROR.ERROR_CODE), true)
 val REFUND_LEDGER_TRANSACTION_UK: Index = Internal.createIndex(DSL.name("refund_ledger_transaction_uk"), Refund.REFUND, arrayOf(Refund.REFUND.LEDGER_TRANSACTION_ID), true)
 val REFUND_PAYMENT_IDX: Index = Internal.createIndex(DSL.name("refund_payment_idx"), Refund.REFUND, arrayOf(Refund.REFUND.PAYMENT_ID), false)
 val REFUND_REFERENCE_UK: Index = Internal.createIndex(DSL.name("refund_reference_uk"), Refund.REFUND, arrayOf(Refund.REFUND.REFUND_REFERENCE), true)
 val TAX_DAILY_BALANCE_IDX: Index = Internal.createIndex(DSL.name("tax_daily_balance_idx"), TaxDailyBalance.TAX_DAILY_BALANCE, arrayOf(TaxDailyBalance.TAX_DAILY_BALANCE.COUNTRY, TaxDailyBalance.TAX_DAILY_BALANCE.BALANCE_DATE.desc()), false)
-val TAX_REMITTANCE_DUE_IDX: Index = Internal.createIndex(DSL.name("tax_remittance_due_idx"), TaxRemittance.TAX_REMITTANCE, arrayOf(TaxRemittance.TAX_REMITTANCE.STATUS, TaxRemittance.TAX_REMITTANCE.PERIOD_START), false)
+val TAX_REMITTANCE_DUE_IDX: Index = Internal.createIndex(DSL.name("tax_remittance_due_idx"), TaxRemittance.TAX_REMITTANCE, arrayOf(TaxRemittance.TAX_REMITTANCE.STATUS, TaxRemittance.TAX_REMITTANCE.CLAIMED_AT, TaxRemittance.TAX_REMITTANCE.PERIOD_START, TaxRemittance.TAX_REMITTANCE.COUNTRY), false)
+val TAX_REMITTANCE_LEDGER_TRANSACTION_UK: Index = Internal.createIndex(DSL.name("tax_remittance_ledger_transaction_uk"), TaxRemittance.TAX_REMITTANCE, arrayOf(TaxRemittance.TAX_REMITTANCE.LEDGER_TRANSACTION_ID), true)

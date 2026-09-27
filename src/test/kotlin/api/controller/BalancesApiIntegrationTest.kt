@@ -12,14 +12,21 @@ import org.example.api.generated.model.TaxBalanceDto
 import org.example.bootstrap.ledgerModule
 import org.example.repository.PayoutRepository
 import org.example.repository.ProcessingErrorRepository
+import org.example.repository.TaxRemittanceRepository
 import org.example.service.InMemoryMerchantRegistry
 import org.example.service.scheduled.PayoutCalculationJob
+import org.example.service.scheduled.TaxRemittanceCalculationJob
+import java.time.LocalDate
+import java.time.ZoneId
 import java.time.Instant
 import java.time.temporal.ChronoUnit
 import java.util.UUID
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import org.example.api.randomUuid
+import org.example.jooq.tables.references.PAYOUT
+import org.example.jooq.tables.references.TAX_REMITTANCE
+import org.example.support.money
 
 class BalancesApiIntegrationTest : LedgerApiIntegrationTestSupport() {
 
@@ -146,6 +153,61 @@ class BalancesApiIntegrationTest : LedgerApiIntegrationTestSupport() {
 
         val balance = snapshot.merchants.single()
         assertEquals("95.0000", balance.available)
+    }
+
+    @Test
+    fun `payout computation moves merchant balance from available to held`() = testApplication {
+        application { ledgerModule(testConfig(), dsl, InMemoryMerchantRegistry(setOf(merchantId))) }
+        seedMerchant()
+        send("/v1/payment/capture", paymentBody())
+
+        val beforeCompute = merchantBalances(merchantId).merchants.single()
+        assertEquals("95.0000", beforeCompute.available)
+        assertEquals("0.0000", beforeCompute.held)
+
+        val date = LocalDate.now(ZoneId.of("Europe/London"))
+        assertEquals(
+            1,
+            runBlocking {
+                PayoutCalculationJob(PayoutRepository(dsl), ProcessingErrorRepository(dsl)).run(date)
+            }.size,
+        )
+
+        val afterCompute = merchantBalances(merchantId).merchants.single()
+        assertEquals("0.0000", afterCompute.available)
+        assertEquals("95.0000", afterCompute.held)
+        assertEquals(
+            0,
+            dsl.selectFrom(PAYOUT).fetchSingle().amount.compareTo(money("95.00")),
+        )
+
+        send("/v1/payment/capture", paymentBody(pspReference = "psp-after-payout"))
+        val afterNewPayment = merchantBalances(merchantId).merchants.single()
+        assertEquals("95.0000", afterNewPayment.available)
+        assertEquals("95.0000", afterNewPayment.held)
+    }
+
+    @Test
+    fun `tax report keeps its calculated balance after remittance computation`() = testApplication {
+        application { ledgerModule(testConfig(), dsl, InMemoryMerchantRegistry(setOf(merchantId))) }
+        send("/v1/payment/capture", paymentBody())
+
+        assertEquals("21.0000", taxBalance("ES").owedAtEnd)
+
+        val period = LocalDate.now(ZoneId.of("Europe/London")).withDayOfMonth(1)
+        assertEquals(
+            1,
+            runBlocking { TaxRemittanceCalculationJob(TaxRemittanceRepository(dsl)).run(period) }.size,
+        )
+
+        assertEquals("21.0000", taxBalance("ES").owedAtEnd)
+        assertEquals(
+            0,
+            dsl.selectFrom(TAX_REMITTANCE).fetchSingle().amount.compareTo(money("21.00")),
+        )
+
+        send("/v1/payment/capture", paymentBody(pspReference = "psp-after-filing"))
+        assertEquals("42.0000", taxBalance("ES").owedAtEnd)
     }
 
     @Test

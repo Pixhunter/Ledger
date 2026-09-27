@@ -158,7 +158,7 @@ class TaxRemittanceRepository(private val dsl: DSLContext) : TaxRemittanceStore,
                 })
                 .execute()
 
-            val reserved = db.insertInto(
+            val inserted = db.insertInto(
                 TAX_REMITTANCE,
                 TAX_REMITTANCE.COUNTRY,
                 TAX_REMITTANCE.PERIOD_START,
@@ -183,6 +183,30 @@ class TaxRemittanceRepository(private val dsl: DSLContext) : TaxRemittanceStore,
                 .fetch()
                 .map { it.get(TAX_REMITTANCE.COUNTRY)!! to it.get(TAX_REMITTANCE.LEDGER_TRANSACTION_ID)!! }
 
+            val insertedIds = inserted.mapTo(mutableSetOf()) { it.second }
+            val reserved = db.select(
+                TAX_REMITTANCE.COUNTRY,
+                TAX_REMITTANCE.LEDGER_TRANSACTION_ID,
+                TAX_REMITTANCE.AMOUNT,
+            )
+                .from(TAX_REMITTANCE)
+                .where(TAX_REMITTANCE.COUNTRY.`in`(candidates.map { it.country }))
+                .and(TAX_REMITTANCE.PERIOD_START.eq(periodStart))
+                .and(TAX_REMITTANCE.STATUS.eq(PayoutStatus.COMPUTED.id))
+                .forUpdate()
+                .fetch()
+                .map {
+                    ReservedRemittance(
+                        country = it.get(TAX_REMITTANCE.COUNTRY)!!,
+                        transactionId = it.get(TAX_REMITTANCE.LEDGER_TRANSACTION_ID)!!,
+                        existingAmount = if (it.get(TAX_REMITTANCE.LEDGER_TRANSACTION_ID) in insertedIds) {
+                            BigDecimal.ZERO
+                        } else {
+                            it.get(TAX_REMITTANCE.AMOUNT)!!
+                        },
+                    )
+                }
+
             if (reserved.isEmpty()) {
                 db.deleteFrom(LEDGER_TRANSACTION)
                     .where(LEDGER_TRANSACTION.ID.`in`(inputs.map { it.second }))
@@ -190,11 +214,14 @@ class TaxRemittanceRepository(private val dsl: DSLContext) : TaxRemittanceStore,
                 return@transactionResult emptyMap()
             }
 
-            val reservedValues = reserved.joinToString(", ") { "(CAST(? AS text), CAST(? AS uuid))" }
+            val reservedValues = reserved.joinToString(", ") {
+                "(CAST(? AS text), CAST(? AS uuid), CAST(? AS numeric))"
+            }
             val bindings = buildList<Any> {
-                reserved.forEach { (country, transactionId) ->
-                    add(country)
-                    add(transactionId)
+                reserved.forEach {
+                    add(it.country)
+                    add(it.transactionId)
+                    add(it.existingAmount)
                 }
                 add(PaymentPurpose.TAX.id)
                 add(Currency.EUR.name)
@@ -207,7 +234,7 @@ class TaxRemittanceRepository(private val dsl: DSLContext) : TaxRemittanceStore,
 
             val computedRows = db.resultQuery(
                 """
-                WITH reserved(country, transaction_id) AS (
+                WITH reserved(country, transaction_id, existing_amount) AS (
                     VALUES $reservedValues
                 ), eligible AS MATERIALIZED (
                     SELECT le.id, le.amount, r.country, r.transaction_id
@@ -238,12 +265,14 @@ class TaxRemittanceRepository(private val dsl: DSLContext) : TaxRemittanceStore,
                     GROUP BY country, transaction_id
                 ), updated_remittances AS (
                     UPDATE mor.tax_remittance r
-                    SET amount = a.amount
+                    SET amount = x.existing_amount + a.amount
                     FROM actual a
+                    JOIN reserved x USING (country, transaction_id)
                     WHERE r.country = a.country
                       AND r.period_start = CAST(? AS date)
                       AND r.ledger_transaction_id = a.transaction_id
-                    RETURNING r.country, r.ledger_transaction_id, r.amount
+                    RETURNING r.country, r.ledger_transaction_id,
+                              a.amount AS computed_amount
                 ), inserted_entries AS (
                     INSERT INTO mor.ledger_entry (
                         transaction_id, purpose, purpose_key, amount, currency, occurred_at
@@ -253,12 +282,12 @@ class TaxRemittanceRepository(private val dsl: DSLContext) : TaxRemittanceStore,
                     FROM updated_remittances r
                     CROSS JOIN LATERAL (
                         VALUES
-                            (CAST(? AS smallint), r.country, r.amount),
-                            (CAST(? AS smallint), NULL::text, -r.amount)
+                            (CAST(? AS smallint), r.country, r.computed_amount),
+                            (CAST(? AS smallint), NULL::text, -r.computed_amount)
                     ) AS entry(purpose, purpose_key, amount)
                     RETURNING transaction_id
                 )
-                SELECT country, ledger_transaction_id, amount
+                SELECT country, ledger_transaction_id, computed_amount
                 FROM updated_remittances
                 ORDER BY country
                 """.trimIndent(),
@@ -268,7 +297,7 @@ class TaxRemittanceRepository(private val dsl: DSLContext) : TaxRemittanceStore,
             val completedIds = computedRows
                 .mapNotNull { it.get("ledger_transaction_id", java.util.UUID::class.java) }
                 .toSet()
-            val unusedReservedIds = reserved.map { it.second }.filterNot(completedIds::contains)
+            val unusedReservedIds = inserted.map { it.second }.filterNot(completedIds::contains)
             if (unusedReservedIds.isNotEmpty()) {
                 db.deleteFrom(TAX_REMITTANCE)
                     .where(TAX_REMITTANCE.LEDGER_TRANSACTION_ID.`in`(unusedReservedIds))
@@ -282,10 +311,17 @@ class TaxRemittanceRepository(private val dsl: DSLContext) : TaxRemittanceStore,
             }
 
             computedRows.associate { row ->
-                row.get("country", String::class.java)!! to row.get("amount", BigDecimal::class.java)!!
+                row.get("country", String::class.java)!! to
+                    row.get("computed_amount", BigDecimal::class.java)!!
             }
         }
     }
+
+    private data class ReservedRemittance(
+        val country: String,
+        val transactionId: java.util.UUID,
+        val existingAmount: BigDecimal,
+    )
 
     override suspend fun due(limit: Int): List<DueTransfer> = io {
         if (limit !in 1..Constants.Jobs.MAX_BATCH_SIZE) return@io emptyList()

@@ -4,10 +4,14 @@ import org.example.model.MerchantBalanceView
 import org.example.model.TaxBalance
 import org.example.api.io
 import org.example.jooq.tables.references.LEDGER_ENTRY
+import org.example.jooq.tables.references.LEDGER_TRANSACTION
 import org.example.jooq.tables.references.MERCHANT
 import org.example.jooq.tables.references.MERCHANT_DAILY_BALANCE
+import org.example.jooq.tables.references.PAYOUT
 import org.example.model.Money
 import org.example.model.enums.PaymentPurpose
+import org.example.model.enums.LedgerTransactionType
+import org.example.model.enums.PayoutStatus
 import org.example.utils.logger
 import org.jooq.Condition
 import org.jooq.DSLContext
@@ -27,8 +31,10 @@ class BalancesRepository(private val dsl: DSLContext) {
 
         val row = dsl.select(owedAt(to), from?.let { owedAt(it) } ?: DSL.inline(Money.ZERO))
             .from(LEDGER_ENTRY)
+            .join(LEDGER_TRANSACTION).on(LEDGER_TRANSACTION.ID.eq(LEDGER_ENTRY.TRANSACTION_ID))
             .where(LEDGER_ENTRY.PURPOSE.eq(PaymentPurpose.TAX.id))
             .and(LEDGER_ENTRY.PURPOSE_KEY.eq(country))
+            .and(businessEntry())
             .fetchOne()
 
         val owedAtEnd = row?.value1() ?: Money.ZERO
@@ -62,11 +68,16 @@ class BalancesRepository(private val dsl: DSLContext) {
 
             val page = db.select(
                 LEDGER_ENTRY.PURPOSE_KEY,
-                owedFor(PaymentPurpose.MERCHANT),
+                owedFor(
+                    PaymentPurpose.MERCHANT,
+                    LEDGER_ENTRY.SETTLED_BY_TRANSACTION_ID.isNull,
+                ),
                 owedFor(PaymentPurpose.HELD),
             )
                 .from(LEDGER_ENTRY)
+                .join(LEDGER_TRANSACTION).on(LEDGER_TRANSACTION.ID.eq(LEDGER_ENTRY.TRANSACTION_ID))
                 .where(LEDGER_ENTRY.PURPOSE.`in`(PaymentPurpose.MERCHANT.id, PaymentPurpose.HELD.id))
+                .and(businessEntry())
                 .and(LEDGER_ENTRY.PURPOSE_KEY.isNotNull)
                 .and(before(asOf))
                 .and(if (keys.isEmpty()) DSL.noCondition() else LEDGER_ENTRY.PURPOSE_KEY.`in`(keys))
@@ -77,19 +88,34 @@ class BalancesRepository(private val dsl: DSLContext) {
                 .fetch()
 
             val ids = page.map { UUID.fromString(it.value1()!!) }
-            val names = if (ids.isEmpty()) emptyMap() else db.select(MERCHANT.ID, MERCHANT.NAME)
+            val merchantMeta = if (ids.isEmpty()) emptyMap() else db.select(
+                MERCHANT.ID,
+                MERCHANT.NAME,
+                DSL.coalesce(DSL.sum(PAYOUT.AMOUNT), Money.ZERO),
+            )
                 .from(MERCHANT)
+                .leftJoin(PAYOUT).on(
+                    PAYOUT.MERCHANT_ID.eq(MERCHANT.ID)
+                        .and(PAYOUT.STATUS.`in`(PayoutStatus.COMPUTED.id, PayoutStatus.PROCESSING.id))
+                )
                 .where(MERCHANT.ID.`in`(ids))
+                .groupBy(MERCHANT.ID, MERCHANT.NAME)
                 .fetch()
-                .associate { it.value1()!! to it.value2()!! }
+                .associate {
+                    it.value1()!! to MerchantReportMeta(
+                        name = it.value2()!!,
+                        pendingPayout = it.value3() ?: Money.ZERO,
+                    )
+                }
 
             page.map {
                 val id = UUID.fromString(it.value1()!!)
                 MerchantBalanceView(
                     merchantId = id,
-                    merchantName = names[id] ?: "unknown merchant",
+                    merchantName = merchantMeta[id]?.name ?: "unknown merchant",
                     available = it.value2() ?: Money.ZERO,
-                    held = it.value3() ?: Money.ZERO,
+                    held = (it.value3() ?: Money.ZERO) +
+                        (merchantMeta[id]?.pendingPayout ?: Money.ZERO),
                 )
             }
         }
@@ -142,12 +168,24 @@ class BalancesRepository(private val dsl: DSLContext) {
             block(db)
         }
 
+    /** Report business activity, not settlement counter-entries. */
+    private fun businessEntry(): Condition =
+        LEDGER_TRANSACTION.TYPE.ne(LedgerTransactionType.PAYOUT.id)
+
     private fun owedAt(instant: Instant): Field<BigDecimal> =
         DSL.sum(LEDGER_ENTRY.AMOUNT.neg()).filterWhere(before(instant))
 
-    private fun owedFor(purpose: PaymentPurpose): Field<BigDecimal> =
-        DSL.sum(LEDGER_ENTRY.AMOUNT.neg()).filterWhere(LEDGER_ENTRY.PURPOSE.eq(purpose.id))
+    private fun owedFor(
+        purpose: PaymentPurpose,
+        condition: Condition = DSL.noCondition(),
+    ): Field<BigDecimal> = DSL.sum(LEDGER_ENTRY.AMOUNT.neg())
+        .filterWhere(LEDGER_ENTRY.PURPOSE.eq(purpose.id).and(condition))
 
     private fun before(instant: Instant): Condition =
         LEDGER_ENTRY.OCCURRED_AT.lt(instant.atOffset(ZoneOffset.UTC))
+
+    private data class MerchantReportMeta(
+        val name: String,
+        val pendingPayout: BigDecimal,
+    )
 }
