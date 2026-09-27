@@ -1,23 +1,58 @@
 package org.example.api.controller
 
-import org.example.api.dto.MerchantBalanceDto
-import org.example.api.dto.MerchantBalancesDto
-import org.example.api.dto.TaxBalanceDto
-import org.example.balances.BalancesStore
-import org.example.model.enums.Currency
-import org.example.toCountry
-import org.example.toInstant
-import org.example.toIntIn
-import org.example.toLocalDate
-import org.example.toUuid
+import io.ktor.server.response.respond
+import io.ktor.server.routing.Route
+import io.ktor.server.routing.get
+import org.example.api.toCountry
+import org.example.api.toInstant
+import org.example.api.toIntIn
+import org.example.api.toLocalDate
+import org.example.api.toUuid
 import java.time.Instant
-import org.example.Constants.Api.DEFAULT_PAGE_LIMIT
-import org.example.Constants.Api.MAX_MERCHANT_IDS
-import org.example.Constants.Api.MAX_PAGE_LIMIT
+import org.example.utils.Constants.Api.DEFAULT_PAGE_LIMIT
+import org.example.utils.Constants.Api.MAX_MERCHANT_IDS
+import org.example.utils.Constants.Api.MAX_PAGE_LIMIT
+import org.example.api.DtoMapper.toDto
+import org.example.api.generated.model.MerchantBalanceDto
+import org.example.api.generated.model.MerchantBalancesDto
+import org.example.api.generated.model.TaxBalanceDto
+import org.example.model.enums.Currency
+import org.example.repository.BalancesRepository
 
-class BalancesController(private val balances: BalancesStore) {
+/**
+ * The finance-facing half of the production API. Owns its own routes: query
+ * strings are parsed here, so nothing forwards them in from a routing layer.
+ */
+class BalancesController(private val balances: BalancesRepository) {
 
-    suspend fun taxBalance(country: String, from: String?, to: String?): TaxBalanceDto {
+    fun routes(route: Route) = with(route) {
+        // Read-only reports. Not PSP endpoints, so no signature: production
+        // needs its own auth for the finance client.
+        get("/v1/balances/tax") {
+            call.respond(
+                taxBalance(
+                    country = call.request.queryParameters["country"]
+                        ?: throw IllegalArgumentException("country is required"),
+                    from = call.request.queryParameters["from"],
+                    to = call.request.queryParameters["to"],
+                )
+            )
+        }
+
+        get("/v1/balances/merchants") {
+            call.respond(
+                merchantBalances(
+                    merchantIds = call.request.queryParameters.getAll("merchantId").orEmpty(),
+                    date = call.request.queryParameters["date"],
+                    asOf = call.request.queryParameters["asOf"],
+                    after = call.request.queryParameters["after"],
+                    limit = call.request.queryParameters["limit"],
+                )
+            )
+        }
+    }
+
+    private suspend fun taxBalance(country: String, from: String?, to: String?): TaxBalanceDto {
         val start = from?.takeIf { it.isNotBlank() }?.toInstant("from")
         val end = to?.takeIf { it.isNotBlank() }?.toInstant("to") ?: Instant.now()
 
@@ -27,7 +62,8 @@ class BalancesController(private val balances: BalancesStore) {
 
         return TaxBalanceDto(
             country = balance.country,
-            currency = Currency.EUR.name,
+            // TODO: add logic when we got several currencies
+            currency = Currency.EUR.toDto(),
             from = balance.from?.toString(),
             to = balance.to.toString(),
             owedAtStart = balance.owedAtStart.toPlainString(),
@@ -36,7 +72,7 @@ class BalancesController(private val balances: BalancesStore) {
         )
     }
 
-    suspend fun merchantBalances(
+    private suspend fun merchantBalances(
         merchantIds: List<String>,
         date: String?,
         asOf: String?,
@@ -63,7 +99,8 @@ class BalancesController(private val balances: BalancesStore) {
         val hasMore = fetched.size > size
 
         return MerchantBalancesDto(
-            currency = Currency.EUR.name,
+            // TODO: add logic when we got several currencies
+            currency = Currency.EUR.toDto(),
             date = day?.toString(),
             asOf = cutoff.toString(),
             limit = size,
@@ -73,7 +110,7 @@ class BalancesController(private val balances: BalancesStore) {
                     merchantId = it.merchantId.toString(),
                     merchantName = it.merchantName,
                     available = it.available.toPlainString(),
-                    held = it.held?.toPlainString(),
+                    held = it.held?.toPlainString() ?: "",
                 )
             },
         )

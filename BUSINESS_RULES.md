@@ -149,9 +149,9 @@ Full list in README.md, "Production TODOs".
 
 | Process                   | Rule                                                 | Status      |
 |---------------------------|------------------------------------------------------|-------------|
-| Merchant payout           | Daily positive balance; exclude `HELD`; fixed cutoff | Implemented, mock PSP client |
+| Merchant payout           | Daily positive balance; exclude `HELD`; fixed cutoff | Implemented, mock transfer client |
 | Negative merchant balance | Carry forward; alert after 14 days                   | Detection implemented; recovery planned |
-| Tax settlement            | Pay per country, monthly on the 5th for the month before | Implemented, mock authority client |
+| Tax settlement            | Pay per country, monthly on the 5th for the month before | Implemented, mock transfer client |
 | Tax rates                 | Version with `valid_from`; cache; freeze on capture  | Implemented |
 | PSP reconciliation        | Compare PSP and ledger totals daily                  | Planned     |
 
@@ -168,6 +168,9 @@ Hourly payout is a later option. It changes scheduling, not accounting.
   warning; the payment is still stored and processed.
 - A non-positive balance is carried forward and future sales offset it.
 - If a merchant remains negative for 14 days, alert operations.
+- A `SUSPENDED` merchant, or one missing from the merchant table, is
+  snapshotted but never paid. The balance accrues until the suspension is
+  resolved. TODO alert once a suspended balance is older than one cycle.
 
 ## Tax remittance
 
@@ -209,9 +212,15 @@ pair (calculate, then disburse) with a nightly balance snapshot;
 negative-balance detection with a 14-day alert; the monthly tax remittance
 pair with a daily tax-balance monitor; and both balance reports.
 
-**Implemented against mocks:** the PSP payout client and the tax authority
-client always succeed. The jobs, ledger entries and idempotency keys are real;
-the bank and the filing integration behind them are not.
+**Implemented against mocks:** one `AcceptingTransferClient` stands in for both
+the PSP and the tax authority - it always succeeds. The jobs, ledger entries
+and idempotency keys are real; the bank and the filing integration are not.
+
+A payout and a tax remittance are the same operation - claim a row, call an
+external party, mark it sent or release it - so both run through one
+`DisbursementJob` over one `DueTransfer` row, told apart only by
+`TransferKind` and the reference it builds (`payout-<merchant>-<date>`,
+`tax-<country>-<period>`).
 
 **Missing for production:** alert delivery - an alert today is a log line plus
 a `processing_error` row, nothing is sent anywhere; exception resolution and

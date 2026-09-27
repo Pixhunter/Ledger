@@ -1,9 +1,8 @@
 package org.example.repository
 
-import org.example.balances.BalancesStore
-import org.example.balances.MerchantBalanceView
-import org.example.balances.TaxBalance
-import org.example.db.io
+import org.example.model.MerchantBalanceView
+import org.example.model.TaxBalance
+import org.example.api.io
 import org.example.jooq.tables.references.LEDGER_ENTRY
 import org.example.jooq.tables.references.MERCHANT
 import org.example.jooq.tables.references.MERCHANT_DAILY_BALANCE
@@ -39,9 +38,9 @@ import java.util.UUID
  * PSP may date up to the accepted drift into the future, so without a cutoff a
  * capture would read as available while the payout job correctly withholds it.
  */
-class BalancesRepository(private val dsl: DSLContext) : BalancesStore {
+class BalancesRepository(private val dsl: DSLContext) {
 
-    override suspend fun taxBalance(country: String, from: Instant?, to: Instant): TaxBalance = io {
+    suspend fun taxBalance(country: String, from: Instant?, to: Instant): TaxBalance = io {
         val row = dsl.select(owedAt(to), from?.let { owedAt(it) } ?: DSL.inline(Money.ZERO))
             .from(LEDGER_ENTRY)
             .where(LEDGER_ENTRY.PURPOSE.eq(PaymentPurpose.TAX.id))
@@ -61,7 +60,12 @@ class BalancesRepository(private val dsl: DSLContext) : BalancesStore {
         )
     }
 
-    override suspend fun merchantBalances(
+    /**
+     * Live balance from the ledger, one keyset page ordered by merchant id.
+     * Entries dated after [asOf] are excluded: a capture booked with a future
+     * tax point is not payable yet, and the payout job already waits for it.
+     */
+    suspend fun merchantBalances(
         merchantIds: List<UUID>,
         asOf: Instant,
         after: UUID?,
@@ -108,9 +112,10 @@ class BalancesRepository(private val dsl: DSLContext) : BalancesStore {
     /**
      * Read straight from the nightly snapshot: for a day the close job ran,
      * this is the number it acted on, which is what a dispute is about.
-     * Held is not snapshotted, so it is absent here.
+     * Held is not snapshotted, so it is absent here. Empty when the job did
+     * not run that day.
      */
-    override suspend fun merchantBalancesOn(
+    suspend fun merchantBalancesOn(
         merchantIds: List<UUID>,
         date: LocalDate,
         after: UUID?,

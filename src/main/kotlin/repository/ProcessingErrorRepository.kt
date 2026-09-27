@@ -1,6 +1,6 @@
 package org.example.repository
 
-import org.example.db.io
+import org.example.api.io
 import org.example.jooq.tables.references.PROCESSING_ERROR
 import org.example.model.ProcessingError
 import org.jooq.DSLContext

@@ -1,8 +1,8 @@
 package org.example.support
 
 import org.example.config.DatabaseConfig
-import org.example.db.Database
-import org.example.db.Migrations
+import org.example.database.Database
+import org.example.database.Migrations
 import org.jooq.DSLContext
 import org.jooq.impl.DSL
 import org.testcontainers.DockerClientFactory

@@ -1,7 +1,6 @@
 package org.example.repository
 
-import org.example.db.Mapper
-import org.example.db.io
+import org.example.database.JsonbMapper
 import org.example.jooq.tables.references.LEDGER_ENTRY
 import org.example.jooq.tables.references.LEDGER_TRANSACTION
 import org.example.jooq.tables.references.PAYMENT
@@ -21,19 +20,20 @@ import org.example.model.enums.LedgerTransactionType
 import org.example.model.enums.PaymentStatus
 import org.example.model.enums.RefundReason
 import org.example.model.enums.TaxCategory
+import org.example.api.io
 import org.jooq.DSLContext
 import org.jooq.impl.DSL
 import org.slf4j.LoggerFactory
 import java.util.UUID
 import java.math.BigDecimal
 import java.time.ZoneOffset
-import org.example.randomUuid
+import org.example.api.randomUuid
 
-class RefundRepository(private val dsl: DSLContext) : RefundStore {
+class RefundRepository(private val dsl: DSLContext) {
 
     private val log = LoggerFactory.getLogger(RefundRepository::class.java)
 
-    override suspend fun findPayment(pspReference: String): PaymentEntity? = io {
+    suspend fun findPayment(pspReference: String): PaymentEntity? = io {
         val rows = dsl.select()
             .from(PAYMENT)
             .leftJoin(PAYMENT_HOLD)
@@ -58,7 +58,7 @@ class RefundRepository(private val dsl: DSLContext) : RefundStore {
             taxCategory = row[PAYMENT.TAX_CATEGORY]?.let { enumById<TaxCategory>(it) },
             taxRateBps = row[PAYMENT.TAX_RATE_BPS],
             reverseCharge = row[PAYMENT.REVERSE_CHARGE] ?: false,
-            evidence = Mapper.fromJsonb<Map<String, String?>>(row[PAYMENT.EVIDENCE]) ?: emptyMap(),
+            evidence = JsonbMapper.fromJsonb<Map<String, String?>>(row[PAYMENT.EVIDENCE]) ?: emptyMap(),
             status = enumById<PaymentStatus>(row[PAYMENT.STATUS]!!),
             holdReasons = rows.mapNotNull { it[PAYMENT_HOLD.REASON] }
                 .map { enumById<HoldReason>(it) }
@@ -67,7 +67,7 @@ class RefundRepository(private val dsl: DSLContext) : RefundStore {
         )
     }
 
-    override suspend fun insert(
+    suspend fun insert(
         refund: RefundEntity,
         rawPayload: String,
         entries: (previousRefundTotal: BigDecimal) -> List<LedgerEntry>,
@@ -87,7 +87,7 @@ class RefundRepository(private val dsl: DSLContext) : RefundStore {
                 .set(REFUND.CURRENCY, refund.currency.name)
                 .set(REFUND.REASON, refund.reason.id)
                 .set(REFUND.FEE_RETURNED, refund.feeReturned)
-                .set(REFUND.REFUNDED_AT, refund.refundedAt.atOffset(java.time.ZoneOffset.UTC))
+                .set(REFUND.REFUNDED_AT, refund.refundedAt.atOffset(ZoneOffset.UTC))
                 .set(REFUND.LEDGER_TRANSACTION_ID, transactionId)
                 .onConflict(REFUND.REFUND_REFERENCE)
                 .doNothing()

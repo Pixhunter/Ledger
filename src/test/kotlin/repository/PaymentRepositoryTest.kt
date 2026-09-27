@@ -27,9 +27,8 @@ import java.util.UUID
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
-import kotlin.test.assertNull
 import kotlin.test.assertTrue
-import org.example.randomUuid
+import org.example.api.randomUuid
 
 class PaymentRepositoryTest : PostgresTest() {
 

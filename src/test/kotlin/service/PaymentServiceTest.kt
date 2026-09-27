@@ -12,8 +12,7 @@ import org.example.model.enums.PaymentPurpose
 import org.example.model.enums.PaymentStatus
 import org.example.model.enums.ProcessingErrorCode
 import org.example.repository.PaymentStore
-import org.example.tax.BasisPoints
-import org.example.tax.TaxRates
+import org.example.repository.BasisPoints
 import org.example.support.money
 import java.math.BigDecimal
 import java.time.Instant
@@ -22,10 +21,9 @@ import java.time.ZoneOffset
 import java.util.UUID
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertNull
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
-import org.example.randomUuid
+import org.example.api.randomUuid
 
 class PaymentServiceTest {
 

@@ -7,7 +7,7 @@ import org.example.model.enums.PaymentPurpose
 import java.math.BigDecimal
 import java.math.RoundingMode
 import org.example.model.Money
-import org.example.Constants
+import org.example.utils.Constants
 
 // TODO release flow must clear hold_reason, or a refund of a released payment credits HELD.
 object RefundEntries {

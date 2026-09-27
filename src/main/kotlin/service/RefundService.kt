@@ -4,14 +4,14 @@ import org.example.model.LedgerWrite
 import org.example.model.RefundEntity
 import org.example.model.RefundModel
 import org.example.model.enums.ProcessingErrorCode
-import org.example.repository.RefundStore
 import org.slf4j.LoggerFactory
 import java.time.Clock
-import org.example.Constants
-import org.example.randomUuid
+import org.example.utils.Constants
+import org.example.api.randomUuid
+import org.example.repository.RefundRepository
 
 class RefundService(
-    private val refunds: RefundStore,
+    private val refunds: RefundRepository,
     private val clock: Clock = Clock.systemUTC(),
 ) {
     private val log = LoggerFactory.getLogger(RefundService::class.java)
