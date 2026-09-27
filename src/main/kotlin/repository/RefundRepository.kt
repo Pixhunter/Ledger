@@ -184,6 +184,7 @@ class RefundRepository(private val dsl: DSLContext) {
             log.info("event=stored status={} amount={}", status, refund.amount)
 
             if (refundedSoFar.compareTo(gross) > 0) {
+                log.info("Refunds greater then balance")
                 insertProcessingError(
                     db,
                     ProcessingError(

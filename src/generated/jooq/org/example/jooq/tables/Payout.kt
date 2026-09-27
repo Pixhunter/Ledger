@@ -15,6 +15,7 @@ import kotlin.collections.List
 import org.example.jooq.Mor
 import org.example.jooq.indexes.PAYOUT_DATE_IDX
 import org.example.jooq.indexes.PAYOUT_DUE_IDX
+import org.example.jooq.indexes.PAYOUT_LEDGER_TRANSACTION_UK
 import org.example.jooq.keys.PAYOUT_PKEY
 import org.example.jooq.keys.PAYOUT__PAYOUT_LEDGER_TRANSACTION_ID_FKEY
 import org.example.jooq.keys.PAYOUT__PAYOUT_MERCHANT_ID_FKEY
@@ -160,7 +161,7 @@ open class Payout(
         override fun `as`(alias: Table<*>): PayoutPath = PayoutPath(alias.qualifiedName, this)
     }
     override fun getSchema(): Schema? = if (aliased()) null else Mor.MOR
-    override fun getIndexes(): List<Index> = listOf(PAYOUT_DATE_IDX, PAYOUT_DUE_IDX)
+    override fun getIndexes(): List<Index> = listOf(PAYOUT_DATE_IDX, PAYOUT_DUE_IDX, PAYOUT_LEDGER_TRANSACTION_UK)
     override fun getPrimaryKey(): UniqueKey<PayoutRecord> = PAYOUT_PKEY
     override fun getReferences(): List<ForeignKey<PayoutRecord, *>> = listOf(PAYOUT__PAYOUT_LEDGER_TRANSACTION_ID_FKEY, PAYOUT__PAYOUT_MERCHANT_ID_FKEY)
 
@@ -179,7 +180,7 @@ open class Payout(
     override fun getChecks(): List<Check<PayoutRecord>> = listOf(
         Internal.createCheck(this, DSL.name("payout_amount_ck"), "((amount > (0)::numeric))", true),
         Internal.createCheck(this, DSL.name("payout_currency_ck"), "((currency ~ '^[A-Z]{3}\$'::text))", true),
-        Internal.createCheck(this, DSL.name("payout_status_ck"), "((status = ANY (ARRAY[1, 2, 3, 4])))", true)
+        Internal.createCheck(this, DSL.name("payout_status_ck"), "((status = ANY (ARRAY[1, 2, 3])))", true)
     )
     override fun `as`(alias: String): Payout = Payout(DSL.name(alias), this)
     override fun `as`(alias: Name): Payout = Payout(alias, this)

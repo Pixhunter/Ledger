@@ -13,6 +13,7 @@ import kotlin.collections.List
 
 import org.example.jooq.Mor
 import org.example.jooq.indexes.LEDGER_ENTRY_BALANCE_IDX
+import org.example.jooq.indexes.LEDGER_ENTRY_SETTLEMENT_TRANSACTION_IDX
 import org.example.jooq.indexes.LEDGER_ENTRY_TRANSACTION_IDX
 import org.example.jooq.indexes.LEDGER_ENTRY_UNSETTLED_MERCHANT_IDX
 import org.example.jooq.keys.LEDGER_ENTRY_PKEY
@@ -155,7 +156,7 @@ open class LedgerEntry(
         override fun `as`(alias: Table<*>): LedgerEntryPath = LedgerEntryPath(alias.qualifiedName, this)
     }
     override fun getSchema(): Schema? = if (aliased()) null else Mor.MOR
-    override fun getIndexes(): List<Index> = listOf(LEDGER_ENTRY_BALANCE_IDX, LEDGER_ENTRY_TRANSACTION_IDX, LEDGER_ENTRY_UNSETTLED_MERCHANT_IDX)
+    override fun getIndexes(): List<Index> = listOf(LEDGER_ENTRY_BALANCE_IDX, LEDGER_ENTRY_SETTLEMENT_TRANSACTION_IDX, LEDGER_ENTRY_TRANSACTION_IDX, LEDGER_ENTRY_UNSETTLED_MERCHANT_IDX)
     override fun getIdentity(): Identity<LedgerEntryRecord, Long?> = super.getIdentity() as Identity<LedgerEntryRecord, Long?>
     override fun getPrimaryKey(): UniqueKey<LedgerEntryRecord> = LEDGER_ENTRY_PKEY
     override fun getReferences(): List<ForeignKey<LedgerEntryRecord, *>> = listOf(LEDGER_ENTRY__LEDGER_ENTRY_SETTLED_BY_TRANSACTION_ID_FKEY, LEDGER_ENTRY__LEDGER_ENTRY_TRANSACTION_ID_FKEY)

@@ -194,7 +194,7 @@ class PayoutRepository(private val dsl: DSLContext) : PayoutStore, TransferStore
                 )
                 .execute()
 
-            val reserved = db.insertInto(
+            val inserted = db.insertInto(
                 PAYOUT,
                 PAYOUT.MERCHANT_ID,
                 PAYOUT.PAYOUT_DATE,
@@ -221,6 +221,30 @@ class PayoutRepository(private val dsl: DSLContext) : PayoutStore, TransferStore
                 .fetch()
                 .map { it.get(PAYOUT.MERCHANT_ID)!! to it.get(PAYOUT.LEDGER_TRANSACTION_ID)!! }
 
+            val insertedIds = inserted.mapTo(mutableSetOf()) { it.second }
+            val reserved = db.select(
+                PAYOUT.MERCHANT_ID,
+                PAYOUT.LEDGER_TRANSACTION_ID,
+                PAYOUT.AMOUNT,
+            )
+                .from(PAYOUT)
+                .where(PAYOUT.MERCHANT_ID.`in`(candidates.map { it.merchantId }))
+                .and(PAYOUT.PAYOUT_DATE.eq(payoutDate))
+                .and(PAYOUT.STATUS.eq(PayoutStatus.COMPUTED.id))
+                .forUpdate()
+                .fetch()
+                .map {
+                    ReservedPayout(
+                        merchantId = it.get(PAYOUT.MERCHANT_ID)!!,
+                        transactionId = it.get(PAYOUT.LEDGER_TRANSACTION_ID)!!,
+                        existingAmount = if (it.get(PAYOUT.LEDGER_TRANSACTION_ID) in insertedIds) {
+                            BigDecimal.ZERO
+                        } else {
+                            it.get(PAYOUT.AMOUNT)!!
+                        },
+                    )
+                }
+
             if (reserved.isEmpty()) {
                 db.deleteFrom(LEDGER_TRANSACTION)
                     .where(LEDGER_TRANSACTION.ID.`in`(inputs.map { it.second }))
@@ -228,11 +252,14 @@ class PayoutRepository(private val dsl: DSLContext) : PayoutStore, TransferStore
                 return@transactionResult emptyList()
             }
 
-            val reservedValues = reserved.joinToString(", ") { "(CAST(? AS uuid), CAST(? AS uuid))" }
+            val reservedValues = reserved.joinToString(", ") {
+                "(CAST(? AS uuid), CAST(? AS uuid), CAST(? AS numeric))"
+            }
             val bindings = buildList<Any> {
-                reserved.forEach { (merchantId, transactionId) ->
-                    add(merchantId)
-                    add(transactionId)
+                reserved.forEach {
+                    add(it.merchantId)
+                    add(it.transactionId)
+                    add(it.existingAmount)
                 }
                 add(PaymentPurpose.MERCHANT.id)
                 add(Currency.EUR.name)
@@ -245,7 +272,7 @@ class PayoutRepository(private val dsl: DSLContext) : PayoutStore, TransferStore
 
             val computedRows = db.resultQuery(
                 """
-                WITH reserved(merchant_id, transaction_id) AS (
+                WITH reserved(merchant_id, transaction_id, existing_amount) AS (
                     VALUES $reservedValues
                 ), eligible AS MATERIALIZED (
                     SELECT le.id, le.amount, r.merchant_id, r.transaction_id
@@ -279,12 +306,14 @@ class PayoutRepository(private val dsl: DSLContext) : PayoutStore, TransferStore
                     GROUP BY merchant_id, transaction_id
                 ), updated_payouts AS (
                     UPDATE mor.payout p
-                    SET amount = a.amount
+                    SET amount = r.existing_amount + a.amount
                     FROM actual a
+                    JOIN reserved r USING (merchant_id, transaction_id)
                     WHERE p.merchant_id = a.merchant_id
                       AND p.payout_date = CAST(? AS date)
                       AND p.ledger_transaction_id = a.transaction_id
-                    RETURNING p.merchant_id, p.ledger_transaction_id, p.amount
+                    RETURNING p.merchant_id, p.ledger_transaction_id,
+                              a.amount AS computed_amount
                 ), inserted_entries AS (
                     INSERT INTO mor.ledger_entry (
                         transaction_id, purpose, purpose_key, amount, currency, occurred_at
@@ -294,12 +323,12 @@ class PayoutRepository(private val dsl: DSLContext) : PayoutStore, TransferStore
                     FROM updated_payouts p
                     CROSS JOIN LATERAL (
                         VALUES
-                            (CAST(? AS smallint), p.merchant_id::text, p.amount),
-                            (CAST(? AS smallint), NULL::text, -p.amount)
+                            (CAST(? AS smallint), p.merchant_id::text, p.computed_amount),
+                            (CAST(? AS smallint), NULL::text, -p.computed_amount)
                     ) AS entry(purpose, purpose_key, amount)
                     RETURNING transaction_id
                 )
-                SELECT merchant_id, ledger_transaction_id, amount
+                SELECT merchant_id, ledger_transaction_id, computed_amount
                 FROM updated_payouts
                 ORDER BY merchant_id
                 """.trimIndent(),
@@ -309,7 +338,7 @@ class PayoutRepository(private val dsl: DSLContext) : PayoutStore, TransferStore
             val computedTransactionIds = computedRows
                 .mapNotNull { it.get("ledger_transaction_id", UUID::class.java) }
                 .toSet()
-            val unusedReservedIds = reserved.map { it.second }.filterNot(computedTransactionIds::contains)
+            val unusedReservedIds = inserted.map { it.second }.filterNot(computedTransactionIds::contains)
             if (unusedReservedIds.isNotEmpty()) {
                 db.deleteFrom(PAYOUT)
                     .where(PAYOUT.LEDGER_TRANSACTION_ID.`in`(unusedReservedIds))
@@ -324,7 +353,8 @@ class PayoutRepository(private val dsl: DSLContext) : PayoutStore, TransferStore
             }
 
             val computedAmounts = computedRows.associate {
-                it.get("merchant_id", UUID::class.java)!! to it.get("amount", BigDecimal::class.java)!!
+                it.get("merchant_id", UUID::class.java)!! to
+                    it.get("computed_amount", BigDecimal::class.java)!!
             }
             candidates.mapNotNull { candidate ->
                 computedAmounts[candidate.merchantId]?.let { candidate.copy(amount = it) }
@@ -334,6 +364,12 @@ class PayoutRepository(private val dsl: DSLContext) : PayoutStore, TransferStore
         log.info("Got ${result.size} results")
         result
     }
+
+    private data class ReservedPayout(
+        val merchantId: UUID,
+        val transactionId: UUID,
+        val existingAmount: BigDecimal,
+    )
 
     override suspend fun due(limit: Int): List<DueTransfer> = io {
         if (limit !in 1..Constants.Jobs.MAX_BATCH_SIZE) return@io emptyList()

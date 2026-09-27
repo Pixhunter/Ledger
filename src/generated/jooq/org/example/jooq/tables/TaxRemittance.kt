@@ -14,6 +14,7 @@ import kotlin.collections.List
 
 import org.example.jooq.Mor
 import org.example.jooq.indexes.TAX_REMITTANCE_DUE_IDX
+import org.example.jooq.indexes.TAX_REMITTANCE_LEDGER_TRANSACTION_UK
 import org.example.jooq.keys.TAX_REMITTANCE_PKEY
 import org.example.jooq.keys.TAX_REMITTANCE__TAX_REMITTANCE_LEDGER_TRANSACTION_ID_FKEY
 import org.example.jooq.tables.LedgerTransaction.LedgerTransactionPath
@@ -157,7 +158,7 @@ open class TaxRemittance(
         override fun `as`(alias: Table<*>): TaxRemittancePath = TaxRemittancePath(alias.qualifiedName, this)
     }
     override fun getSchema(): Schema? = if (aliased()) null else Mor.MOR
-    override fun getIndexes(): List<Index> = listOf(TAX_REMITTANCE_DUE_IDX)
+    override fun getIndexes(): List<Index> = listOf(TAX_REMITTANCE_DUE_IDX, TAX_REMITTANCE_LEDGER_TRANSACTION_UK)
     override fun getPrimaryKey(): UniqueKey<TaxRemittanceRecord> = TAX_REMITTANCE_PKEY
     override fun getReferences(): List<ForeignKey<TaxRemittanceRecord, *>> = listOf(TAX_REMITTANCE__TAX_REMITTANCE_LEDGER_TRANSACTION_ID_FKEY)
 
@@ -171,7 +172,7 @@ open class TaxRemittance(
         Internal.createCheck(this, DSL.name("tax_remittance_amount_ck"), "((amount > (0)::numeric))", true),
         Internal.createCheck(this, DSL.name("tax_remittance_country_ck"), "((country ~ '^[A-Z]{2}\$'::text))", true),
         Internal.createCheck(this, DSL.name("tax_remittance_currency_ck"), "((currency ~ '^[A-Z]{3}\$'::text))", true),
-        Internal.createCheck(this, DSL.name("tax_remittance_status_ck"), "((status = ANY (ARRAY[1, 2, 3, 4])))", true)
+        Internal.createCheck(this, DSL.name("tax_remittance_status_ck"), "((status = ANY (ARRAY[1, 2, 3])))", true)
     )
     override fun `as`(alias: String): TaxRemittance = TaxRemittance(DSL.name(alias), this)
     override fun `as`(alias: Name): TaxRemittance = TaxRemittance(alias, this)

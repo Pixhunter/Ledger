@@ -213,6 +213,8 @@ Reports:
 
 Each report request uses one database snapshot. `occurred_at` is the PSP event
 time, so late webhooks remain in the correct financial period.
+Settlement transfer entries are excluded from these reports, so running a
+payout or tax-remittance job does not erase the calculated business balance.
 
 ## Database schema
 
@@ -390,6 +392,10 @@ Payout calculation reserves one `(merchant, date)` row, locks and settles only
 eligible ledger entries, and leaves racing or late entries for the next run.
 Non-positive and suspended merchant balances are not paid. Fourteen consecutive
 negative days create an operational error.
+
+The manual compute endpoints are repeatable while a batch is still `COMPUTED`:
+newly arrived entries are appended to the existing payout or tax remittance.
+A run with no new entries is a no-op; a batch already being sent is immutable.
 
 Transfers use safe row claiming with `FOR UPDATE SKIP LOCKED`, a `PROCESSING`
 state and stable receiver idempotency keys. The current transfer client always

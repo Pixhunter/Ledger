@@ -4,10 +4,12 @@ import org.example.model.MerchantBalanceView
 import org.example.model.TaxBalance
 import org.example.api.io
 import org.example.jooq.tables.references.LEDGER_ENTRY
+import org.example.jooq.tables.references.LEDGER_TRANSACTION
 import org.example.jooq.tables.references.MERCHANT
 import org.example.jooq.tables.references.MERCHANT_DAILY_BALANCE
 import org.example.model.Money
 import org.example.model.enums.PaymentPurpose
+import org.example.model.enums.LedgerTransactionType
 import org.example.utils.logger
 import org.jooq.Condition
 import org.jooq.DSLContext
@@ -27,8 +29,10 @@ class BalancesRepository(private val dsl: DSLContext) {
 
         val row = dsl.select(owedAt(to), from?.let { owedAt(it) } ?: DSL.inline(Money.ZERO))
             .from(LEDGER_ENTRY)
+            .join(LEDGER_TRANSACTION).on(LEDGER_TRANSACTION.ID.eq(LEDGER_ENTRY.TRANSACTION_ID))
             .where(LEDGER_ENTRY.PURPOSE.eq(PaymentPurpose.TAX.id))
             .and(LEDGER_ENTRY.PURPOSE_KEY.eq(country))
+            .and(businessEntry())
             .fetchOne()
 
         val owedAtEnd = row?.value1() ?: Money.ZERO
@@ -66,7 +70,9 @@ class BalancesRepository(private val dsl: DSLContext) {
                 owedFor(PaymentPurpose.HELD),
             )
                 .from(LEDGER_ENTRY)
+                .join(LEDGER_TRANSACTION).on(LEDGER_TRANSACTION.ID.eq(LEDGER_ENTRY.TRANSACTION_ID))
                 .where(LEDGER_ENTRY.PURPOSE.`in`(PaymentPurpose.MERCHANT.id, PaymentPurpose.HELD.id))
+                .and(businessEntry())
                 .and(LEDGER_ENTRY.PURPOSE_KEY.isNotNull)
                 .and(before(asOf))
                 .and(if (keys.isEmpty()) DSL.noCondition() else LEDGER_ENTRY.PURPOSE_KEY.`in`(keys))
@@ -141,6 +147,10 @@ class BalancesRepository(private val dsl: DSLContext) {
             db.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
             block(db)
         }
+
+    /** Report business activity, not settlement counter-entries. */
+    private fun businessEntry(): Condition =
+        LEDGER_TRANSACTION.TYPE.ne(LedgerTransactionType.PAYOUT.id)
 
     private fun owedAt(instant: Instant): Field<BigDecimal> =
         DSL.sum(LEDGER_ENTRY.AMOUNT.neg()).filterWhere(before(instant))
